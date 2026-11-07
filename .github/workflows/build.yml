@@ -38,9 +38,9 @@ jobs:
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "ndk;$NDK_VERSION"
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> $GITHUB_ENV
 
-      - name: Cache GStreamer Android SDK
+      - name: Restore GStreamer Android SDK Cache
         id: cache-gstreamer
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ~/gst-sdk
           key: gst-android-universal-${{ env.GST_VERSION }}-dual-abi
@@ -78,6 +78,13 @@ jobs:
           rm -rf x86 x86_64 || true
           ls -la
 
+      - name: Save GStreamer SDK to Cache Immediately
+        if: steps.cache-gstreamer.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/gst-sdk
+          key: gst-android-universal-${{ env.GST_VERSION }}-dual-abi
+
       - name: Set GStreamer Environment Variables
         run: |
           # GStreamer root folder extracted from tarball
@@ -89,8 +96,13 @@ jobs:
           echo "gstAndroidRoot=$GSTREAMER_ROOT" >> gradle.properties
           echo "Using GSTREAMER_ROOT_ANDROID=$GSTREAMER_ROOT"
 
-      - name: Ensure gradlew has execute permission
-        run: chmod +x gradlew || true
+      - name: Ensure Gradle Wrapper is ready
+        run: |
+          if [ ! -f "gradlew" ]; then
+            echo "gradlew wrapper script missing, generating..."
+            gradle wrapper || true
+          fi
+          chmod +x gradlew
 
       - name: Build Debug APK with Dual ABI (armeabi-v7a & arm64-v8a)
         run: |
