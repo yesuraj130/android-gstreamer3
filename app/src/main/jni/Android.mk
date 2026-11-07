@@ -1,6 +1,11 @@
 LOCAL_PATH := $(call my-dir)
 
 include $(CLEAR_VARS)
+LOCAL_MODULE := tutorial-1
+LOCAL_SRC_FILES := tutorial-1.c
+LOCAL_SHARED_LIBRARIES := gstreamer_android
+LOCAL_LDLIBS := -llog -landroid
+include $(BUILD_SHARED_LIBRARY)
 
 # Retrieve GSTREAMER_ROOT_ANDROID from arguments, environment, or fallback
 ifeq ($(strip $(GSTREAMER_ROOT_ANDROID)),)
@@ -35,11 +40,5 @@ include $(GSTREAMER_NDK_BUILD_PATH)/plugins.mk
 GSTREAMER_PLUGINS := $(GSTREAMER_PLUGINS_CORE)
 GSTREAMER_EXTRA_DEPS := gstreamer-1.0
 
+# GStreamer makefile MUST be included at the end of Android.mk
 include $(GSTREAMER_NDK_BUILD_PATH)/gstreamer-1.0.mk
-
-include $(CLEAR_VARS)
-LOCAL_MODULE := tutorial-1
-LOCAL_SRC_FILES := tutorial-1.c
-LOCAL_SHARED_LIBRARIES := gstreamer_android
-LOCAL_LDLIBS := -llog -landroid
-include $(BUILD_SHARED_LIBRARY)

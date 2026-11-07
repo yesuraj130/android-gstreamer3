@@ -30,7 +30,13 @@ android {
     if (!gstRoot.isNullOrEmpty()) {
       externalNativeBuild {
         ndkBuild {
-          arguments("GSTREAMER_ROOT_ANDROID=$gstRoot")
+          arguments(
+            "NDK_APPLICATION_MK=src/main/jni/Application.mk",
+            "GSTREAMER_JAVA_SRC_DIR=src/main/java",
+            "GSTREAMER_ROOT_ANDROID=$gstRoot",
+            "GSTREAMER_ASSETS_DIR=src/main/assets"
+          )
+          targets.add("tutorial-1")
         }
       }
     }
