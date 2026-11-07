@@ -43,9 +43,15 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/gst-sdk
-          key: gst-android-universal-${{ env.GST_VERSION }}
+          key: gst-android-universal-${{ env.GST_VERSION }}-dual-abi
 
-      - name: Download & Extract GStreamer Android SDK
+      - name: Install aria2 for high-speed multi-connection download
+        if: steps.cache-gstreamer.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq aria2
+
+      - name: Download & Extract GStreamer Android SDK (Multi-stream)
         if: steps.cache-gstreamer.outputs.cache-hit != 'true'
         run: |
           mkdir -p ~/gst-sdk
@@ -54,16 +60,22 @@ jobs:
           PRIMARY_URL="https://gstreamer.freedesktop.org/data/pkg/android/${GST_VERSION}/${ARCHIVE_NAME}"
           FALLBACK_URL="https://gstreamer.freedesktop.org/data/pkg/android/1.24.12/gstreamer-1.0-android-universal-1.24.12.tar.xz"
 
-          echo "Fetching GStreamer Android binaries..."
-          if curl -f -L -o "$ARCHIVE_NAME" "$PRIMARY_URL"; then
-            echo "Successfully downloaded $PRIMARY_URL"
+          echo "Starting multi-connection download (16 streams via aria2c)..."
+          if aria2c -x16 -s16 -j16 -k1M --file-allocation=none --max-tries=10 --retry-wait=2 "$PRIMARY_URL" -o "$ARCHIVE_NAME"; then
+            echo "Successfully downloaded $PRIMARY_URL with aria2c"
           else
-            echo "1.28 mirror archive not found or still in staging, trying fallback $FALLBACK_URL"
-            curl -f -L -o "$ARCHIVE_NAME" "$FALLBACK_URL"
+            echo "1.28 primary mirror slow or unavailable, switching to fallback $FALLBACK_URL..."
+            aria2c -x16 -s16 -j16 -k1M --file-allocation=none --max-tries=10 --retry-wait=2 "$FALLBACK_URL" -o "$ARCHIVE_NAME"
           fi
 
-          echo "Extracting GStreamer Universal SDK (armeabi-v7a & arm64-v8a)..."
+          echo "Extracting GStreamer Universal SDK..."
           tar -xf "$ARCHIVE_NAME"
+
+          echo "Cleaning up archive and unused x86/x86_64 binaries to keep cache compact..."
+          rm -f "$ARCHIVE_NAME"
+          # Keep only armeabi-v7a (armv7) and arm64-v8a (arm64) as requested
+          rm -rf gstreamer-1.0-android-universal*/x86 gstreamer-1.0-android-universal*/x86_64 || true
+          rm -rf x86 x86_64 || true
           ls -la
 
       - name: Set GStreamer Environment Variables
