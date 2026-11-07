@@ -52,6 +52,7 @@ object GStreamerBridge {
 
     private var nativeLibrariesLoaded = false
     private var nativeLoadError: String? = null
+    private var appContext: Context? = null
 
     private val _logs = MutableStateFlow<List<ConsoleLog>>(emptyList())
     val logs: StateFlow<List<ConsoleLog>> = _logs.asStateFlow()
@@ -62,12 +63,16 @@ object GStreamerBridge {
     private val _isPlaying = MutableStateFlow(false)
     val isPlaying: StateFlow<Boolean> = _isPlaying.asStateFlow()
 
-    private val _activePipelineString = MutableStateFlow("videotestsrc ! autovideosink")
+    private val _activePipelineString = MutableStateFlow("videotestsrc ! videoconvert ! autovideosink")
     val activePipelineString: StateFlow<String> = _activePipelineString.asStateFlow()
 
     private var cachedSurface: Surface? = null
 
     private val timeFormatter = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
+
+    fun initContext(context: Context) {
+        appContext = context.applicationContext
+    }
 
     fun appendLog(level: LogLevel, tag: String, message: String) {
         val entry = ConsoleLog(
@@ -89,12 +94,41 @@ object GStreamerBridge {
         appendLog(LogLevel.CMD, "SYS", "Console logs cleared.")
     }
 
+    /**
+     * Called from C JNI on native GStreamer bus messages (errors, warnings, info).
+     */
+    @JvmStatic
+    fun onNativeMessage(message: String, isError: Boolean) {
+        appendLog(
+            level = if (isError) LogLevel.ERROR else LogLevel.INFO,
+            tag = "GST-BUS",
+            message = message
+        )
+    }
+
+    /**
+     * Called from C JNI when the pipeline state changes (NULL, READY, PAUSED, PLAYING).
+     */
+    @JvmStatic
+    fun onNativeStateChanged(stateName: String) {
+        appendLog(
+            level = if (stateName == "PLAYING") LogLevel.SUCCESS else LogLevel.INFO,
+            tag = "STATE",
+            message = "Pipeline state transitioned to: $stateName"
+        )
+        when (stateName) {
+            "PLAYING" -> _isPlaying.value = true
+            "NULL", "READY" -> _isPlaying.value = false
+        }
+    }
+
     fun setSurface(surface: Surface) {
         cachedSurface = surface
+        appendLog(LogLevel.INFO, "SURFACE", "Surface received from SurfaceView ($surface)")
         if (nativeLibrariesLoaded) {
             try {
                 nativeSetSurface(surface)
-                appendLog(LogLevel.SUCCESS, "SURFACE", "Surface attached to native video overlay")
+                appendLog(LogLevel.SUCCESS, "SURFACE", "Native ANativeWindow bound to video overlay")
             } catch (t: Throwable) {
                 appendLog(LogLevel.ERROR, "SURFACE", "Error attaching surface: ${t.message}")
             }
@@ -106,7 +140,7 @@ object GStreamerBridge {
         if (nativeLibrariesLoaded) {
             try {
                 nativeClearSurface()
-                appendLog(LogLevel.INFO, "SURFACE", "Surface detached")
+                appendLog(LogLevel.INFO, "SURFACE", "Surface detached from native overlay")
             } catch (t: Throwable) {
                 appendLog(LogLevel.ERROR, "SURFACE", "Error clearing surface: ${t.message}")
             }
@@ -124,21 +158,38 @@ object GStreamerBridge {
         appendLog(LogLevel.CMD, "PIPELINE", "gst-launch-1.0 $trimmed")
 
         if (!nativeLibrariesLoaded) {
-            appendLog(LogLevel.ERROR, "PIPELINE", "Native libraries not loaded. Cannot start pipeline.")
-            return@withContext
+            // Attempt loading if not loaded
+            val loaded = tryLoadNativeLibraries()
+            if (!loaded) {
+                appendLog(LogLevel.ERROR, "PIPELINE", "Native libraries not loaded. Build APK via GitHub Actions.")
+                return@withContext
+            }
+        }
+
+        // Ensure GStreamer runtime is initialized
+        appContext?.let { ctx ->
+            try {
+                GStreamer.init(ctx)
+            } catch (e: Exception) {
+                appendLog(LogLevel.WARN, "INIT", "GStreamer.init: ${e.message}")
+            }
         }
 
         try {
-            // Re-apply surface if cached
-            cachedSurface?.let { nativeSetSurface(it) }
+            // Ensure cached surface is re-bound
+            cachedSurface?.let {
+                appendLog(LogLevel.INFO, "SURFACE", "Re-binding cached SurfaceView to native window")
+                nativeSetSurface(it)
+            }
 
+            appendLog(LogLevel.INFO, "PIPELINE", "Invoking gst_parse_launch & initializing GLib main loop...")
             val errorMsg = nativeStartPipeline(trimmed)
             if (errorMsg != null) {
                 _isPlaying.value = false
                 appendLog(LogLevel.ERROR, "PIPELINE", "gst_parse_launch error: $errorMsg")
             } else {
                 _isPlaying.value = true
-                appendLog(LogLevel.SUCCESS, "PIPELINE", "State changed: GST_STATE_PLAYING")
+                appendLog(LogLevel.SUCCESS, "PIPELINE", "gst_parse_launch succeeded. Pipeline set to GST_STATE_PLAYING")
             }
         } catch (t: Throwable) {
             _isPlaying.value = false
@@ -163,7 +214,23 @@ object GStreamerBridge {
         }
     }
 
+    private fun tryLoadNativeLibraries(): Boolean {
+        if (nativeLibrariesLoaded) return true
+        return try {
+            System.loadLibrary("gstreamer_android")
+            System.loadLibrary("tutorial-1")
+            nativeLibrariesLoaded = true
+            nativeLoadError = null
+            true
+        } catch (t: Throwable) {
+            nativeLibrariesLoaded = false
+            nativeLoadError = t.message ?: t.toString()
+            false
+        }
+    }
+
     suspend fun runDiagnostics(context: Context) = withContext(Dispatchers.IO) {
+        initContext(context)
         _engineState.value = GstEngineState.Inspecting
         _logs.value = emptyList()
 
@@ -229,7 +296,10 @@ object GStreamerBridge {
                 _engineState.value = GstEngineState.Ready(version = versionInfo, abi = primaryAbi)
 
                 // If surface was already bound before init, attach it now
-                cachedSurface?.let { nativeSetSurface(it) }
+                cachedSurface?.let {
+                    nativeSetSurface(it)
+                    appendLog(LogLevel.SUCCESS, "SURFACE", "Pre-existing surface bound to GStreamer")
+                }
             } catch (e: UnsatisfiedLinkError) {
                 appendLog(LogLevel.ERROR, "JNI", "UnsatisfiedLinkError while invoking native methods: ${e.message}")
                 _engineState.value = GstEngineState.Failed("JNI Linkage error: ${e.message}")

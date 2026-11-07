@@ -70,18 +70,19 @@ data class PipelinePreset(
 )
 
 val DEFAULT_PRESETS = listOf(
-    PipelinePreset("Color Bars", "videotestsrc ! autovideosink"),
-    PipelinePreset("Bouncing Ball", "videotestsrc pattern=ball ! autovideosink"),
-    PipelinePreset("Snow Noise", "videotestsrc pattern=snow ! autovideosink"),
-    PipelinePreset("SMPTE 100", "videotestsrc pattern=smpte100 ! autovideosink"),
-    PipelinePreset("Circular Pinwheel", "videotestsrc pattern=circle ! autovideosink")
+    PipelinePreset("Color Bars", "videotestsrc ! videoconvert ! autovideosink"),
+    PipelinePreset("Bouncing Ball", "videotestsrc pattern=ball ! videoconvert ! autovideosink"),
+    PipelinePreset("Snow Noise", "videotestsrc pattern=snow ! videoconvert ! autovideosink"),
+    PipelinePreset("SMPTE 100", "videotestsrc pattern=smpte100 ! videoconvert ! autovideosink"),
+    PipelinePreset("Circular Pinwheel", "videotestsrc pattern=circle ! videoconvert ! autovideosink"),
+    PipelinePreset("Direct Sink", "videotestsrc ! autovideosink")
 )
 
 @Composable
 fun VideoPipelineSection(modifier: Modifier = Modifier) {
     val scope = rememberCoroutineScope()
     val isPlaying by GStreamerBridge.isPlaying.collectAsState()
-    var pipelineText by remember { mutableStateOf("videotestsrc ! autovideosink") }
+    var pipelineText by remember { mutableStateOf("videotestsrc ! videoconvert ! autovideosink") }
 
     Column(modifier = modifier.fillMaxWidth()) {
         // Video Viewport Box (SurfaceView)
@@ -111,6 +112,7 @@ fun VideoPipelineSection(modifier: Modifier = Modifier) {
                                     "SURFACE",
                                     "Surface format changed: ${width}x${height} format=$format"
                                 )
+                                GStreamerBridge.setSurface(holder.surface)
                             }
 
                             override fun surfaceDestroyed(holder: SurfaceHolder) {
