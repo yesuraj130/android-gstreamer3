@@ -9,7 +9,7 @@ plugins {
 android {
   namespace = "com.example"
   compileSdk = 36
-  ndkVersion = "26.3.11579264"
+  ndkVersion = "25.2.9519653" // Android NDK r25c (official GStreamer toolchain)
 
   val gstRoot = System.getenv("GSTREAMER_ROOT_ANDROID")
     ?: (project.findProperty("gstAndroidRoot") as? String)

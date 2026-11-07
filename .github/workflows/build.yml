@@ -19,7 +19,7 @@ jobs:
 
     env:
       GST_VERSION: ${{ github.event.inputs.gst_version || '1.28.0' }}
-      NDK_VERSION: '26.3.11579264'
+      NDK_VERSION: '25.2.9519653'
 
     steps:
       - name: Checkout Code
