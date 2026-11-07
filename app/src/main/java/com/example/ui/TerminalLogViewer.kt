@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -256,20 +257,20 @@ private fun TerminalHeader(engineState: GstEngineState) {
 
 @Composable
 private fun SpecBanner(engineState: GstEngineState) {
-    Card(
+    Surface(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = ConsoleSurface),
-        shape = RoundedCornerShape(8.dp),
-        border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(ConsoleBorder))
+        color = ConsoleSurface,
+        shape = RoundedCornerShape(6.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, ConsoleBorder)
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 6.dp),
+                .padding(horizontal = 12.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column {
+            Column(modifier = Modifier.weight(1f, fill = false)) {
                 Text(
                     text = "TARGET: GStreamer 1.28 (Tutorial 1)",
                     color = ColorSuccess,
@@ -286,6 +287,7 @@ private fun SpecBanner(engineState: GstEngineState) {
             }
 
             if (engineState is GstEngineState.Ready) {
+                Spacer(modifier = Modifier.width(8.dp))
                 Text(
                     text = engineState.version,
                     color = ColorCmd,
@@ -350,7 +352,8 @@ private fun TerminalControls(
 ) {
     Row(
         modifier = Modifier
-            .fillMaxWidth(),
+            .fillMaxWidth()
+            .navigationBarsPadding(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {

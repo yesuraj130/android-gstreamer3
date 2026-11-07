@@ -11,13 +11,19 @@ import androidx.compose.ui.Modifier
 import com.example.ui.TerminalLogViewer
 import com.example.ui.theme.MyApplicationTheme
 
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
             MyApplicationTheme {
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
+                Scaffold(
+                    modifier = Modifier.fillMaxSize(),
+                    contentWindowInsets = WindowInsets.safeDrawing
+                ) { innerPadding ->
                     TerminalLogViewer(modifier = Modifier.padding(innerPadding))
                 }
             }
