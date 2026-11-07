@@ -12,6 +12,9 @@ android {
   namespace = "com.example"
   compileSdk { version = release(36) { minorApiLevel = 1 } }
 
+  val gstRoot = System.getenv("GSTREAMER_ROOT_ANDROID")
+    ?: (project.findProperty("gstAndroidRoot") as? String)
+
   defaultConfig {
     applicationId = "com.example"
     minSdk = 26
@@ -24,11 +27,15 @@ android {
     ndk {
       abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a"))
     }
-  }
 
-  // Check if GStreamer SDK root is provided via environment or gradle.properties
-  val gstRoot = System.getenv("GSTREAMER_ROOT_ANDROID")
-    ?: (project.findProperty("gstAndroidRoot") as? String)
+    if (!gstRoot.isNullOrEmpty()) {
+      externalNativeBuild {
+        ndkBuild {
+          arguments("GSTREAMER_ROOT_ANDROID=$gstRoot")
+        }
+      }
+    }
+  }
 
   if (!gstRoot.isNullOrEmpty() && file(gstRoot).exists() && file("src/main/jni/Android.mk").exists()) {
     externalNativeBuild {

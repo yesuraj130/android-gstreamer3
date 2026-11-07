@@ -2,16 +2,36 @@ LOCAL_PATH := $(call my-dir)
 
 include $(CLEAR_VARS)
 
-# The GSTREAMER_ROOT_ANDROID environment variable or gradle property points to the GStreamer SDK
-GSTREAMER_ROOT_ANDROID := $(GST_DEBUG_ROOT_ANDROID)
-ifndef GSTREAMER_ROOT_ANDROID
-$(error GSTREAMER_ROOT_ANDROID is not defined!)
+# Retrieve GSTREAMER_ROOT_ANDROID from arguments, environment, or fallback
+ifeq ($(strip $(GSTREAMER_ROOT_ANDROID)),)
+    GSTREAMER_ROOT_ANDROID := $(GST_DEBUG_ROOT_ANDROID)
 endif
 
-GSTREAMER_NDK_BUILD_PATH := $(GSTREAMER_ROOT_ANDROID)/share/gst-android/ndk-build
+ifeq ($(strip $(GSTREAMER_ROOT_ANDROID)),)
+    $(error GSTREAMER_ROOT_ANDROID is not defined!)
+endif
+
+# Map TARGET_ARCH_ABI to the respective ABI folder in the universal SDK
+ifeq ($(TARGET_ARCH_ABI),armeabi-v7a)
+    GSTREAMER_ROOT := $(wildcard $(GSTREAMER_ROOT_ANDROID)/armv7)
+    ifeq ($(strip $(GSTREAMER_ROOT)),)
+        GSTREAMER_ROOT := $(GSTREAMER_ROOT_ANDROID)/arm
+    endif
+else ifeq ($(TARGET_ARCH_ABI),arm64-v8a)
+    GSTREAMER_ROOT := $(GSTREAMER_ROOT_ANDROID)/arm64
+else
+    GSTREAMER_ROOT := $(GSTREAMER_ROOT_ANDROID)
+endif
+
+# Fallback to root directory if share/gst-android exists directly in root
+ifeq ($(wildcard $(GSTREAMER_ROOT)/share/gst-android/ndk-build),)
+    GSTREAMER_ROOT := $(GSTREAMER_ROOT_ANDROID)
+endif
+
+GSTREAMER_NDK_BUILD_PATH := $(GSTREAMER_ROOT)/share/gst-android/ndk-build
 include $(GSTREAMER_NDK_BUILD_PATH)/plugins.mk
 
-# Tutorial 1: Default core elements only
+# Tutorial 1: Core elements only
 GSTREAMER_PLUGINS := $(GSTREAMER_PLUGINS_CORE)
 GSTREAMER_EXTRA_DEPS := gstreamer-1.0
 
