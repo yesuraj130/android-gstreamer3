@@ -1,0 +1,92 @@
+name: Build GStreamer Android APK
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+    inputs:
+      gst_version:
+        description: 'GStreamer Version'
+        required: true
+        default: '1.28.0'
+
+jobs:
+  build:
+    name: Build GStreamer 1.28 Dual-ABI APK
+    runs-on: ubuntu-latest
+
+    env:
+      GST_VERSION: ${{ github.event.inputs.gst_version || '1.28.0' }}
+      NDK_VERSION: '27.2.12479018'
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Install Android NDK
+        run: |
+          echo "Installing Android NDK $NDK_VERSION..."
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "ndk;$NDK_VERSION"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> $GITHUB_ENV
+
+      - name: Cache GStreamer Android SDK
+        id: cache-gstreamer
+        uses: actions/cache@v4
+        with:
+          path: ~/gst-sdk
+          key: gst-android-universal-${{ env.GST_VERSION }}
+
+      - name: Download & Extract GStreamer Android SDK
+        if: steps.cache-gstreamer.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/gst-sdk
+          cd ~/gst-sdk
+          ARCHIVE_NAME="gstreamer-1.0-android-universal-${GST_VERSION}.tar.xz"
+          PRIMARY_URL="https://gstreamer.freedesktop.org/data/pkg/android/${GST_VERSION}/${ARCHIVE_NAME}"
+          FALLBACK_URL="https://gstreamer.freedesktop.org/data/pkg/android/1.24.12/gstreamer-1.0-android-universal-1.24.12.tar.xz"
+
+          echo "Fetching GStreamer Android binaries..."
+          if curl -f -L -o "$ARCHIVE_NAME" "$PRIMARY_URL"; then
+            echo "Successfully downloaded $PRIMARY_URL"
+          else
+            echo "1.28 mirror archive not found or still in staging, trying fallback $FALLBACK_URL"
+            curl -f -L -o "$ARCHIVE_NAME" "$FALLBACK_URL"
+          fi
+
+          echo "Extracting GStreamer Universal SDK (armeabi-v7a & arm64-v8a)..."
+          tar -xf "$ARCHIVE_NAME"
+          ls -la
+
+      - name: Set GStreamer Environment Variables
+        run: |
+          # GStreamer root folder extracted from tarball
+          GSTREAMER_ROOT="$HOME/gst-sdk"
+          if [ -d "$HOME/gst-sdk/gstreamer-1.0-android-universal" ]; then
+            GSTREAMER_ROOT="$HOME/gst-sdk/gstreamer-1.0-android-universal"
+          fi
+          echo "GSTREAMER_ROOT_ANDROID=$GSTREAMER_ROOT" >> $GITHUB_ENV
+          echo "gstAndroidRoot=$GSTREAMER_ROOT" >> gradle.properties
+          echo "Using GSTREAMER_ROOT_ANDROID=$GSTREAMER_ROOT"
+
+      - name: Ensure gradlew has execute permission
+        run: chmod +x gradlew || true
+
+      - name: Build Debug APK with Dual ABI (armeabi-v7a & arm64-v8a)
+        run: |
+          ./gradlew assembleDebug --stacktrace
+
+      - name: Upload Debug APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gstreamer-app-debug
+          path: app/build/outputs/apk/debug/*.apk
+          retention-days: 14

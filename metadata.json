@@ -1,0 +1,6 @@
+{
+  "name": "GStreamer Viewer",
+  "description": "GStreamer diagnostic and streaming player for Android TV and mobile",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
