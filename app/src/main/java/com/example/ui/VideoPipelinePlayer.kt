@@ -72,7 +72,7 @@ data class PipelinePreset(
 val DEFAULT_PRESETS = listOf(
     PipelinePreset("Color Bars", "videotestsrc ! videoconvert ! autovideosink"),
     PipelinePreset("Bouncing Ball", "videotestsrc pattern=ball ! videoconvert ! autovideosink"),
-    PipelinePreset("RTSP Stream", "rtspsrc location=rtsp://wowzaec2demo.streamlock.net/vod/mp4:BigBuckBunny_175k.mov ! rtph264depay ! h264parse ! decodebin ! videoconvert ! autovideosink"),
+    PipelinePreset("RTSP Stream", "rtspsrc location=rtsp://wowzaec2demo.streamlock.net/vod/mp4:BigBuckBunny_175k.mov protocols=tcp latency=100 ! rtph264depay ! h264parse ! decodebin ! videoconvert ! autovideosink"),
     PipelinePreset("RTSP (playbin)", "playbin uri=rtsp://wowzaec2demo.streamlock.net/vod/mp4:BigBuckBunny_175k.mov"),
     PipelinePreset("Snow Noise", "videotestsrc pattern=snow ! videoconvert ! autovideosink"),
     PipelinePreset("SMPTE 100", "videotestsrc pattern=smpte100 ! videoconvert ! autovideosink")

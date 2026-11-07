@@ -83,8 +83,6 @@ static void notify_java_state(const char *state_name) {
 /*
  * Bus sync handler to capture 'prepare-window-handle' messages
  * and automatically bind the ANativeWindow to the video sink.
- * NOTE: MUST only lock window_mutex (NEVER pipeline_mutex) to avoid deadlocking
- * when called synchronously during gst_element_set_state().
  */
 static GstBusSyncReply bus_sync_handler(GstBus *bus, GstMessage *msg, gpointer user_data) {
     if (gst_is_video_overlay_prepare_window_handle_message(msg)) {
@@ -93,10 +91,22 @@ static GstBusSyncReply bus_sync_handler(GstBus *bus, GstMessage *msg, gpointer u
         if (current_native_window != NULL) {
             LOGI("bus_sync_handler: binding ANativeWindow %p to overlay sink", current_native_window);
             gst_video_overlay_set_window_handle(overlay, (guintptr)current_native_window);
+            gst_video_overlay_expose(overlay);
         } else {
             LOGW("bus_sync_handler: prepare-window-handle received but current_native_window is NULL");
         }
         pthread_mutex_unlock(&window_mutex);
+
+        pthread_mutex_lock(&pipeline_mutex);
+        if (current_video_sink != GST_ELEMENT(overlay)) {
+            if (current_video_sink != NULL) {
+                gst_object_unref(current_video_sink);
+            }
+            current_video_sink = GST_ELEMENT(gst_object_ref(overlay));
+            LOGI("bus_sync_handler: cached dynamic video sink %p", current_video_sink);
+        }
+        pthread_mutex_unlock(&pipeline_mutex);
+
         gst_message_unref(msg);
         return GST_BUS_DROP;
     }
@@ -355,18 +365,19 @@ Java_com_example_gstreamer_GStreamerBridge_nativeStartPipeline(JNIEnv *env, jobj
     GstStateChangeReturn ready_ret = gst_element_set_state(current_pipeline, GST_STATE_READY);
     LOGI("gst_element_set_state READY returned: %d", ready_ret);
 
-    /* Look for video sink overlay */
+    /* Look for video sink overlay if already instantiated statically */
     current_video_sink = gst_bin_get_by_interface(GST_BIN(current_pipeline), GST_TYPE_VIDEO_OVERLAY);
     if (current_video_sink != NULL) {
-        LOGI("Found GstVideoOverlay in pipeline");
+        LOGI("Found GstVideoOverlay in pipeline statically at READY state");
         pthread_mutex_lock(&window_mutex);
         if (current_native_window != NULL) {
             LOGI("Immediately binding current ANativeWindow %p to sink", current_native_window);
             gst_video_overlay_set_window_handle(GST_VIDEO_OVERLAY(current_video_sink), (guintptr)current_native_window);
+            gst_video_overlay_expose(GST_VIDEO_OVERLAY(current_video_sink));
         }
         pthread_mutex_unlock(&window_mutex);
     } else {
-        LOGI("No GstVideoOverlay interface found in pipeline (audio only or autovideosink sub-bin)");
+        LOGI("No GstVideoOverlay interface found statically yet (will be bound via bus_sync_handler on prepare-window-handle)");
     }
 
     /* Start playback */
