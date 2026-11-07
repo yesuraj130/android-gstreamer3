@@ -36,8 +36,20 @@ endif
 GSTREAMER_NDK_BUILD_PATH := $(GSTREAMER_ROOT)/share/gst-android/ndk-build
 include $(GSTREAMER_NDK_BUILD_PATH)/plugins.mk
 
-# Core + Playback + System video/audio + Network (rtspsrc, rtp, udp, tcp, soup) plugins
-GSTREAMER_PLUGINS := $(GSTREAMER_PLUGINS_CORE) $(GSTREAMER_PLUGINS_PLAYBACK) $(GSTREAMER_PLUGINS_SYS) $(GSTREAMER_PLUGINS_NET)
+# Core + Playback + System + Network + H264/H265/AAC Parsers & Decoders
+GSTREAMER_PLUGINS := \
+    $(GSTREAMER_PLUGINS_CORE) \
+    $(GSTREAMER_PLUGINS_PLAYBACK) \
+    $(GSTREAMER_PLUGINS_SYS) \
+    $(GSTREAMER_PLUGINS_NET) \
+    typefindfunctions \
+    videoparsersbad \
+    audioparsers \
+    isomp4 \
+    matroska \
+    androidmedia \
+    libav
+
 GSTREAMER_EXTRA_DEPS := gstreamer-video-1.0
 
 # GStreamer makefile MUST be included at the end of Android.mk
