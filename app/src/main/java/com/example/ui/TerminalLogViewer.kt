@@ -115,6 +115,11 @@ fun TerminalLogViewer(modifier: Modifier = Modifier) {
 
             Spacer(modifier = Modifier.height(8.dp))
 
+            // Video Output Surface & Custom Pipeline Controls (Tutorials 2 & 3)
+            VideoPipelineSection()
+
+            Spacer(modifier = Modifier.height(8.dp))
+
             // Terminal Log Window
             Box(
                 modifier = Modifier
