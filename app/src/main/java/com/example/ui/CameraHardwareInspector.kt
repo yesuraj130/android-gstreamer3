@@ -144,18 +144,31 @@ object CameraHardwareInspector {
         return try {
             val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
             val primaryIds = cameraManager.cameraIdList.toList()
-            val allIds = mutableListOf<String>()
-            allIds.addAll(primaryIds)
+            val validIds = mutableListOf<String>()
 
-            // 1. Inspect physical sub-cameras backing logical cameras (Android 9+ / API 28+)
+            for (id in primaryIds) {
+                try {
+                    cameraManager.getCameraCharacteristics(id)
+                    validIds.add(id)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Camera ID $id not accessible: ${e.message}")
+                }
+            }
+
+            // Inspect physical sub-cameras backing logical cameras (Android 9+ / API 28+)
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
                 for (id in primaryIds) {
                     try {
                         val chars = cameraManager.getCameraCharacteristics(id)
                         val physicalIds = chars.physicalCameraIds
                         for (pId in physicalIds) {
-                            if (!allIds.contains(pId)) {
-                                allIds.add(pId)
+                            if (!validIds.contains(pId)) {
+                                try {
+                                    cameraManager.getCameraCharacteristics(pId)
+                                    validIds.add(pId)
+                                } catch (e: Exception) {
+                                    Log.w(TAG, "Physical camera $pId not accessible: ${e.message}")
+                                }
                             }
                         }
                     } catch (e: Exception) {
@@ -164,15 +177,8 @@ object CameraHardwareInspector {
                 }
             }
 
-            // 2. Also probe hardware indices 2 and 3 (ultra-wide & telephoto/macro)
-            for (candidate in listOf("2", "3")) {
-                if (!allIds.contains(candidate)) {
-                    allIds.add(candidate)
-                }
-            }
-
             val list = mutableListOf<AvailableCameraDevice>()
-            for (id in allIds) {
+            for (id in validIds) {
                 val devIdx = id.toIntOrNull() ?: list.size
                 var facingStr = if (id == "1") "Front" else "Back"
                 var focal: Float? = null
@@ -195,19 +201,11 @@ object CameraHardwareInspector {
                         facing == CameraCharacteristics.LENS_FACING_FRONT -> "Front Selfie"
                         focal != null && focal < 3.2f -> "Ultra-Wide (0.6x)"
                         focal != null && focal >= 6.5f -> "Telephoto (${String.format(java.util.Locale.US, "%.1fx", focal / 4.2f)})"
-                        id == "2" -> "Ultra-Wide (0.6x)"
-                        id == "3" -> "Telephoto / Macro"
                         id == "0" -> "Back Main (1x)"
                         else -> "Back Lens $id"
                     }
                 } catch (e: Exception) {
-                    if (id == "2") {
-                        lensType = "Ultra-Wide (0.6x)"
-                        facingStr = "Back"
-                    } else if (id == "3") {
-                        lensType = "Telephoto / Macro"
-                        facingStr = "Back"
-                    }
+                    Log.w(TAG, "Error reading characteristics for $id", e)
                 }
 
                 val label = "$lensType (dev=$id)"
@@ -223,13 +221,19 @@ object CameraHardwareInspector {
                 )
             }
 
-            list.distinctBy { it.deviceIndex }.sortedBy { it.deviceIndex }
+            if (list.isEmpty()) {
+                listOf(
+                    AvailableCameraDevice(0, "0", "Back", "Back Main (1x)", null, "Back Main (1x) (dev=0)"),
+                    AvailableCameraDevice(1, "1", "Front", "Front Selfie", null, "Front Selfie (dev=1)")
+                )
+            } else {
+                list.distinctBy { it.deviceIndex }.sortedBy { it.deviceIndex }
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error enumerating camera devices", e)
             listOf(
                 AvailableCameraDevice(0, "0", "Back", "Back Main (1x)", null, "Back Main (1x) (dev=0)"),
-                AvailableCameraDevice(1, "1", "Front", "Front Selfie", null, "Front Selfie (dev=1)"),
-                AvailableCameraDevice(2, "2", "Back", "Ultra-Wide (0.6x)", null, "Ultra-Wide (0.6x) (dev=2)")
+                AvailableCameraDevice(1, "1", "Front", "Front Selfie", null, "Front Selfie (dev=1)")
             )
         }
     }
