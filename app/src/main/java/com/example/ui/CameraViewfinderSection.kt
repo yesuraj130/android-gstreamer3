@@ -12,6 +12,7 @@ import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -26,6 +27,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -136,7 +138,9 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
     ) {
         // Mode Header & Permissions Badge
         Surface(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .wrapContentHeight(),
             color = ConsoleSurface,
             shape = RoundedCornerShape(8.dp),
             border = androidx.compose.foundation.BorderStroke(1.dp, ConsoleBorder)
@@ -144,7 +148,7 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
@@ -153,15 +157,15 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
                         imageVector = Icons.Default.Videocam,
                         contentDescription = "Camera Viewfinder",
                         tint = ColorCmd,
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(18.dp)
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "Camera Viewfinder (Live Capture)",
+                        text = "Camera Viewfinder",
                         color = ColorText,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp
+                        fontSize = 12.sp
                     )
                 }
 
@@ -169,21 +173,13 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Camera permission status dot
-                    StatusBadge(
-                        label = "CAM",
-                        isGranted = hasCameraPermission
-                    )
-                    // Mic permission status dot
-                    StatusBadge(
-                        label = "MIC",
-                        isGranted = hasMicPermission
-                    )
+                    StatusBadge(label = "CAM", isGranted = hasCameraPermission)
+                    StatusBadge(label = "MIC", isGranted = hasMicPermission)
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
         // If permissions missing -> Permission Request UI
         if (!hasCameraPermission || !hasMicPermission) {
@@ -468,7 +464,8 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 6.dp),
+                        .horizontalScroll(rememberScrollState())
+                        .padding(bottom = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
@@ -483,7 +480,7 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
                     FilterChip(
                         selected = gstAhcDevice == 0,
                         onClick = { gstAhcDevice = 0 },
-                        label = { Text("Back (device=0)", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
+                        label = { Text("Back (0)", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
                         colors = FilterChipDefaults.filterChipColors(
                             containerColor = ConsoleSurface,
                             labelColor = ColorText,
@@ -495,7 +492,7 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
                     FilterChip(
                         selected = gstAhcDevice == 1,
                         onClick = { gstAhcDevice = 1 },
-                        label = { Text("Front (device=1)", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
+                        label = { Text("Front (1)", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
                         colors = FilterChipDefaults.filterChipColors(
                             containerColor = ConsoleSurface,
                             labelColor = ColorText,
@@ -521,6 +518,7 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
                         .padding(bottom = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -536,7 +534,7 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
                     FilterChip(
                         selected = gstRotationMethod == "clockwise",
                         onClick = { gstRotationMethod = "clockwise" },
-                        label = { Text("90° CW (Back Portrait)", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
+                        label = { Text("90° CW", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
                         colors = FilterChipDefaults.filterChipColors(
                             containerColor = ConsoleSurface,
                             labelColor = ColorText,
@@ -548,7 +546,7 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
                     FilterChip(
                         selected = gstRotationMethod == "counterclockwise",
                         onClick = { gstRotationMethod = "counterclockwise" },
-                        label = { Text("90° CCW (Front Portrait)", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
+                        label = { Text("90° CCW", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
                         colors = FilterChipDefaults.filterChipColors(
                             containerColor = ConsoleSurface,
                             labelColor = ColorText,
@@ -560,7 +558,7 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
                     FilterChip(
                         selected = gstRotationMethod == "none",
                         onClick = { gstRotationMethod = "none" },
-                        label = { Text("0° (Landscape)", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
+                        label = { Text("0° (Native)", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
                         colors = FilterChipDefaults.filterChipColors(
                             containerColor = ConsoleSurface,
                             labelColor = ColorText,
