@@ -21,7 +21,6 @@ static pthread_mutex_t window_mutex = PTHREAD_MUTEX_INITIALIZER;
 /* Native window and pipeline references */
 static ANativeWindow *current_native_window = NULL;
 static GstElement *current_pipeline = NULL;
-static GstElement *current_video_sink = NULL;
 static GstBus *current_bus = NULL;
 
 /* Dedicated GLib worker thread & event loop */
@@ -83,6 +82,7 @@ static void notify_java_state(const char *state_name) {
 /*
  * Bus sync handler to capture 'prepare-window-handle' messages
  * and automatically bind the ANativeWindow to the video sink.
+ * CRITICAL: MUST ONLY lock window_mutex (NEVER pipeline_mutex) to avoid self-deadlock.
  */
 static GstBusSyncReply bus_sync_handler(GstBus *bus, GstMessage *msg, gpointer user_data) {
     if (gst_is_video_overlay_prepare_window_handle_message(msg)) {
@@ -93,20 +93,9 @@ static GstBusSyncReply bus_sync_handler(GstBus *bus, GstMessage *msg, gpointer u
             gst_video_overlay_set_window_handle(overlay, (guintptr)current_native_window);
             gst_video_overlay_expose(overlay);
         } else {
-            LOGW("bus_sync_handler: prepare-window-handle received but current_native_window is NULL");
+            LOGW("bus_sync_handler: prepare-window-handle received but native_window is NULL");
         }
         pthread_mutex_unlock(&window_mutex);
-
-        pthread_mutex_lock(&pipeline_mutex);
-        if (current_video_sink != GST_ELEMENT(overlay)) {
-            if (current_video_sink != NULL) {
-                gst_object_unref(current_video_sink);
-            }
-            current_video_sink = GST_ELEMENT(gst_object_ref(overlay));
-            LOGI("bus_sync_handler: cached dynamic video sink %p", current_video_sink);
-        }
-        pthread_mutex_unlock(&pipeline_mutex);
-
         gst_message_unref(msg);
         return GST_BUS_DROP;
     }
@@ -230,8 +219,7 @@ Java_com_example_gstreamer_GStreamerBridge_nativeSetSurface(JNIEnv *env, jobject
 
     pthread_mutex_lock(&pipeline_mutex);
     if (current_pipeline != NULL && active_win != NULL) {
-        GstElement *overlay = current_video_sink ? (GstElement *)gst_object_ref(current_video_sink) :
-            gst_bin_get_by_interface(GST_BIN(current_pipeline), GST_TYPE_VIDEO_OVERLAY);
+        GstElement *overlay = gst_bin_get_by_interface(GST_BIN(current_pipeline), GST_TYPE_VIDEO_OVERLAY);
         if (overlay != NULL) {
             LOGI("Binding active window %p to overlay", active_win);
             gst_video_overlay_set_window_handle(GST_VIDEO_OVERLAY(overlay), (guintptr)active_win);
@@ -249,8 +237,7 @@ JNIEXPORT void JNICALL
 Java_com_example_gstreamer_GStreamerBridge_nativeClearSurface(JNIEnv *env, jobject thiz) {
     pthread_mutex_lock(&pipeline_mutex);
     if (current_pipeline != NULL) {
-        GstElement *overlay = current_video_sink ? (GstElement *)gst_object_ref(current_video_sink) :
-            gst_bin_get_by_interface(GST_BIN(current_pipeline), GST_TYPE_VIDEO_OVERLAY);
+        GstElement *overlay = gst_bin_get_by_interface(GST_BIN(current_pipeline), GST_TYPE_VIDEO_OVERLAY);
         if (overlay != NULL) {
             gst_video_overlay_set_window_handle(GST_VIDEO_OVERLAY(overlay), (guintptr)NULL);
             gst_object_unref(overlay);
@@ -281,10 +268,6 @@ Java_com_example_gstreamer_GStreamerBridge_nativeStopPipeline(JNIEnv *env, jobje
             gst_bus_set_sync_handler(current_bus, NULL, NULL, NULL);
             gst_object_unref(current_bus);
             current_bus = NULL;
-        }
-        if (current_video_sink != NULL) {
-            gst_object_unref(current_video_sink);
-            current_video_sink = NULL;
         }
         gst_object_unref(current_pipeline);
         current_pipeline = NULL;
@@ -317,10 +300,6 @@ Java_com_example_gstreamer_GStreamerBridge_nativeStartPipeline(JNIEnv *env, jobj
             gst_bus_set_sync_handler(current_bus, NULL, NULL, NULL);
             gst_object_unref(current_bus);
             current_bus = NULL;
-        }
-        if (current_video_sink != NULL) {
-            gst_object_unref(current_video_sink);
-            current_video_sink = NULL;
         }
         gst_object_unref(current_pipeline);
         current_pipeline = NULL;
@@ -361,24 +340,21 @@ Java_com_example_gstreamer_GStreamerBridge_nativeStartPipeline(JNIEnv *env, jobj
         }
     }
 
-    /* Transition pipeline to READY to instantiate sinks and elements */
+    /* Transition pipeline to READY to instantiate elements */
     GstStateChangeReturn ready_ret = gst_element_set_state(current_pipeline, GST_STATE_READY);
     LOGI("gst_element_set_state READY returned: %d", ready_ret);
 
-    /* Look for video sink overlay if already instantiated statically */
-    current_video_sink = gst_bin_get_by_interface(GST_BIN(current_pipeline), GST_TYPE_VIDEO_OVERLAY);
-    if (current_video_sink != NULL) {
-        LOGI("Found GstVideoOverlay in pipeline statically at READY state");
-        pthread_mutex_lock(&window_mutex);
-        if (current_native_window != NULL) {
-            LOGI("Immediately binding current ANativeWindow %p to sink", current_native_window);
-            gst_video_overlay_set_window_handle(GST_VIDEO_OVERLAY(current_video_sink), (guintptr)current_native_window);
-            gst_video_overlay_expose(GST_VIDEO_OVERLAY(current_video_sink));
+    /* Eagerly set window handle if window is active */
+    pthread_mutex_lock(&window_mutex);
+    if (current_native_window != NULL) {
+        GstElement *overlay = gst_bin_get_by_interface(GST_BIN(current_pipeline), GST_TYPE_VIDEO_OVERLAY);
+        if (overlay != NULL) {
+            LOGI("Eagerly binding window %p at READY state", current_native_window);
+            gst_video_overlay_set_window_handle(GST_VIDEO_OVERLAY(overlay), (guintptr)current_native_window);
+            gst_object_unref(overlay);
         }
-        pthread_mutex_unlock(&window_mutex);
-    } else {
-        LOGI("No GstVideoOverlay interface found statically yet (will be bound via bus_sync_handler on prepare-window-handle)");
     }
+    pthread_mutex_unlock(&window_mutex);
 
     /* Start playback */
     GstStateChangeReturn play_ret = gst_element_set_state(current_pipeline, GST_STATE_PLAYING);
@@ -391,10 +367,6 @@ Java_com_example_gstreamer_GStreamerBridge_nativeStartPipeline(JNIEnv *env, jobj
             gst_bus_set_sync_handler(current_bus, NULL, NULL, NULL);
             gst_object_unref(current_bus);
             current_bus = NULL;
-        }
-        if (current_video_sink != NULL) {
-            gst_object_unref(current_video_sink);
-            current_video_sink = NULL;
         }
         gst_object_unref(current_pipeline);
         current_pipeline = NULL;
