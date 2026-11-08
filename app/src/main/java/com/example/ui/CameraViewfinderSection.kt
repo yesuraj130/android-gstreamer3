@@ -110,6 +110,7 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
     var lensFacing by remember { mutableStateOf(CameraSelector.LENS_FACING_BACK) }
     var isGstCameraActive by remember { mutableStateOf(false) }
     var gstAhcDevice by remember { mutableStateOf(0) } // 0 = Back, 1 = Front, -1 = Auto
+    var gstRotationMethod by remember { mutableStateOf("clockwise") } // "clockwise" = 90° CW (default for portrait)
 
     // Unbind CameraX whenever switching to GStreamer ahcsrc mode to release camera hardware lock
     LaunchedEffect(cameraMode) {
@@ -513,6 +514,59 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
                     )
                 }
 
+                // Rotation Selector (90° CW, 90° CCW, 180°, 0° Native)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = "Rotation:",
+                        color = ColorCmd,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+
+                    FilterChip(
+                        selected = gstRotationMethod == "clockwise",
+                        onClick = { gstRotationMethod = "clockwise" },
+                        label = { Text("90° CW (Back Portrait)", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            containerColor = ConsoleSurface,
+                            labelColor = ColorText,
+                            selectedContainerColor = Color(0xFF1F6FEB),
+                            selectedLabelColor = Color.White
+                        )
+                    )
+
+                    FilterChip(
+                        selected = gstRotationMethod == "counterclockwise",
+                        onClick = { gstRotationMethod = "counterclockwise" },
+                        label = { Text("90° CCW (Front Portrait)", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            containerColor = ConsoleSurface,
+                            labelColor = ColorText,
+                            selectedContainerColor = Color(0xFF1F6FEB),
+                            selectedLabelColor = Color.White
+                        )
+                    )
+
+                    FilterChip(
+                        selected = gstRotationMethod == "none",
+                        onClick = { gstRotationMethod = "none" },
+                        label = { Text("0° (Landscape)", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            containerColor = ConsoleSurface,
+                            labelColor = ColorText,
+                            selectedContainerColor = Color(0xFF1F6FEB),
+                            selectedLabelColor = Color.White
+                        )
+                    )
+                }
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -532,9 +586,10 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
                                 GStreamerBridge.stopPipeline()
                                 kotlinx.coroutines.delay(150) // Allow Android CameraManager HAL to finalize session close
 
-                                // 3. Build ahcsrc pipeline
+                                // 3. Build zero-latency ahcsrc pipeline with leaky queue & videoflip rotation
                                 val devParam = if (gstAhcDevice >= 0) "device=$gstAhcDevice " else ""
-                                val pipelineStr = "ahcsrc ${devParam}! videoconvert ! glimagesink sync=false"
+                                val flipParam = if (gstRotationMethod != "none") "! videoflip method=$gstRotationMethod " else ""
+                                val pipelineStr = "ahcsrc ${devParam}! queue max-size-buffers=1 leaky=downstream ${flipParam}! videoconvert ! glimagesink sync=false"
 
                                 GStreamerBridge.startPipeline(pipelineStr)
                                 isGstCameraActive = true

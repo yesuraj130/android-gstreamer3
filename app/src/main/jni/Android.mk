@@ -55,6 +55,7 @@ GSTREAMER_PLUGINS := \
     tcp \
     soup \
     androidmedia \
+    videofilter \
     libav
 
 GSTREAMER_EXTRA_DEPS := gstreamer-video-1.0

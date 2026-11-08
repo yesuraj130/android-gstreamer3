@@ -72,7 +72,7 @@ data class PipelinePreset(
 val DEFAULT_PRESETS = listOf(
     PipelinePreset("Color Bars", "videotestsrc ! videoconvert ! autovideosink"),
     PipelinePreset("Bouncing Ball", "videotestsrc pattern=ball ! videoconvert ! autovideosink"),
-    PipelinePreset("Camera (ahcsrc)", "ahcsrc device=0 ! videoconvert ! glimagesink sync=false"),
+    PipelinePreset("Camera (ahcsrc)", "ahcsrc device=0 ! queue max-size-buffers=1 leaky=downstream ! videoflip method=clockwise ! videoconvert ! glimagesink sync=false"),
     PipelinePreset("Low-Latency RTSP", "rtspsrc location=rtsp://192.168.0.107:8554/live latency=0 buffer-mode=none drop-on-latency=true ! decodebin3 ! glimagesink sync=false"),
     PipelinePreset("RTSP (rtspsrc + TCP)", "rtspsrc location=rtsp://rtspstream.com/pattern protocols=tcp latency=100 ! rtph264depay ! h264parse ! decodebin ! videoconvert ! autovideosink"),
     PipelinePreset("RTSP (uridecodebin + TCP)", "uridecodebin uri=rtsp://rtspstream.com/pattern source::protocols=tcp ! videoconvert ! autovideosink"),
@@ -88,7 +88,62 @@ fun VideoPipelineSection(modifier: Modifier = Modifier) {
     val currentDebugLevel by GStreamerBridge.debugLevel.collectAsState()
     var pipelineText by remember { mutableStateOf("videotestsrc ! videoconvert ! autovideosink") }
 
-    Column(modifier = modifier.fillMaxWidth()) {
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(12.dp)
+    ) {
+        // Player Header Banner
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            color = ConsoleSurface,
+            shape = RoundedCornerShape(8.dp),
+            border = androidx.compose.foundation.BorderStroke(1.dp, ConsoleBorder)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Tv,
+                        contentDescription = "Player Viewport",
+                        tint = ColorCmd,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "GStreamer 1.28 Pipeline Viewport",
+                        color = ColorText,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp
+                    )
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(if (isPlaying) ColorSuccess else Color(0xFF8B949E))
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = if (isPlaying) "PLAYING" else "IDLE",
+                        color = if (isPlaying) ColorSuccess else ColorText,
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
         // Video Viewport Box (SurfaceView)
         Box(
             modifier = Modifier
