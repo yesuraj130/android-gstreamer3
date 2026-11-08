@@ -47,6 +47,12 @@ GSTREAMER_PLUGINS := \
     audioparsers \
     isomp4 \
     matroska \
+    rtsp \
+    rtp \
+    rtpmanager \
+    udp \
+    tcp \
+    soup \
     androidmedia \
     libav
 

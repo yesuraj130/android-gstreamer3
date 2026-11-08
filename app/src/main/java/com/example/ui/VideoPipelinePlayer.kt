@@ -72,9 +72,10 @@ data class PipelinePreset(
 val DEFAULT_PRESETS = listOf(
     PipelinePreset("Color Bars", "videotestsrc ! videoconvert ! autovideosink"),
     PipelinePreset("Bouncing Ball", "videotestsrc pattern=ball ! videoconvert ! autovideosink"),
-    PipelinePreset("HTTP Sintel Video", "souphttpsrc location=https://gstreamer.freedesktop.org/data/media/sintel_trailer-480p.webm user-agent=\"Mozilla/5.0\" ssl-strict=false ! matroskademux ! decodebin ! videoconvert ! autovideosink"),
-    PipelinePreset("RTSP TCP Stream", "rtspsrc location=rtsp://rtspstream.com/pattern protocols=tcp latency=100 user-agent=\"GStreamer\" ! rtph264depay ! h264parse ! decodebin ! videoconvert ! autovideosink"),
-    PipelinePreset("RTSP (playbin)", "playbin uri=rtsp://rtspstream.com/pattern"),
+    PipelinePreset("RTSP (rtspsrc + TCP)", "rtspsrc location=rtsp://rtspstream.com/pattern protocols=tcp latency=100 ! rtph264depay ! h264parse ! decodebin ! videoconvert ! autovideosink"),
+    PipelinePreset("RTSP (uridecodebin + TCP)", "uridecodebin uri=rtsp://rtspstream.com/pattern source::protocols=tcp ! videoconvert ! autovideosink"),
+    PipelinePreset("RTSP (playbin + TCP)", "playbin uri=rtsp://rtspstream.com/pattern source::protocols=tcp"),
+    PipelinePreset("HTTP MP4", "souphttpsrc location=http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4 user-agent=\"Mozilla/5.0\" ssl-strict=false ! qtdemux ! h264parse ! decodebin ! videoconvert ! autovideosink"),
     PipelinePreset("Snow Noise", "videotestsrc pattern=snow ! videoconvert ! autovideosink")
 )
 
@@ -82,6 +83,7 @@ val DEFAULT_PRESETS = listOf(
 fun VideoPipelineSection(modifier: Modifier = Modifier) {
     val scope = rememberCoroutineScope()
     val isPlaying by GStreamerBridge.isPlaying.collectAsState()
+    val currentDebugLevel by GStreamerBridge.debugLevel.collectAsState()
     var pipelineText by remember { mutableStateOf("videotestsrc ! videoconvert ! autovideosink") }
 
     Column(modifier = modifier.fillMaxWidth()) {
@@ -210,7 +212,7 @@ fun VideoPipelineSection(modifier: Modifier = Modifier) {
                         )
                     },
                     modifier = Modifier
-                        .testTag("preset_${preset.title.replace(" ", "_")}")
+                        .testTag("preset_${preset.title.replace(" ", "_").replace("(", "").replace(")", "").replace("+", "")}")
                         .onFocusChanged { chipFocused = it.isFocused }
                         .border(
                             width = if (chipFocused) 2.dp else 0.dp,
@@ -231,6 +233,61 @@ fun VideoPipelineSection(modifier: Modifier = Modifier) {
                         selectedBorderColor = Color(0xFF58A6FF)
                     )
                 )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        // Log Verbosity Level Selector
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = "GST Log Verbosity:",
+                color = ColorCmd,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                val levels = listOf(
+                    2 to "WARN (2)",
+                    4 to "INFO (4)",
+                    5 to "DEBUG (5)",
+                    6 to "LOG (6)"
+                )
+                levels.forEach { (levelVal, label) ->
+                    val isLvlSelected = currentDebugLevel == levelVal
+                    FilterChip(
+                        selected = isLvlSelected,
+                        onClick = { GStreamerBridge.setDebugLevel(levelVal) },
+                        label = {
+                            Text(
+                                text = label,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 10.sp
+                            )
+                        },
+                        colors = FilterChipDefaults.filterChipColors(
+                            containerColor = ConsoleSurface,
+                            labelColor = ColorText,
+                            selectedContainerColor = Color(0xFF238636),
+                            selectedLabelColor = Color.White
+                        ),
+                        border = FilterChipDefaults.filterChipBorder(
+                            enabled = true,
+                            selected = isLvlSelected,
+                            borderColor = ConsoleBorder,
+                            selectedBorderColor = ColorSuccess
+                        ),
+                        modifier = Modifier.height(28.dp)
+                    )
+                }
             }
         }
 

@@ -49,6 +49,7 @@ object GStreamerBridge {
     private external fun nativeStartPipeline(pipelineDesc: String): String?
     private external fun nativeStopPipeline()
     private external fun nativeGetPipelineState(): Int
+    private external fun nativeSetDebugLevel(level: Int)
 
     private var nativeLibrariesLoaded = false
     private var nativeLoadError: String? = null
@@ -66,12 +67,26 @@ object GStreamerBridge {
     private val _activePipelineString = MutableStateFlow("videotestsrc ! videoconvert ! autovideosink")
     val activePipelineString: StateFlow<String> = _activePipelineString.asStateFlow()
 
+    private val _debugLevel = MutableStateFlow(5) // Default: 5 (DEBUG)
+    val debugLevel: StateFlow<Int> = _debugLevel.asStateFlow()
+
     private var cachedSurface: Surface? = null
 
     private val timeFormatter = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
 
     fun initContext(context: Context) {
         appContext = context.applicationContext
+    }
+
+    fun setDebugLevel(level: Int) {
+        _debugLevel.value = level
+        if (nativeLibrariesLoaded) {
+            try {
+                nativeSetDebugLevel(level)
+            } catch (t: Throwable) {
+                appendLog(LogLevel.WARN, "DEBUG", "nativeSetDebugLevel failed: ${t.message}")
+            }
+        }
     }
 
     fun appendLog(level: LogLevel, tag: String, message: String) {

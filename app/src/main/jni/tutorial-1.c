@@ -23,6 +23,9 @@ static ANativeWindow *current_native_window = NULL;
 static GstElement *current_pipeline = NULL;
 static GstBus *current_bus = NULL;
 
+/* Debug level state (default: GST_LEVEL_DEBUG = 5 for verbose logging) */
+static GstDebugLevel current_debug_level = GST_LEVEL_DEBUG;
+
 /* Dedicated GLib worker thread & event loop */
 static pthread_t gst_worker_thread;
 static GMainLoop *gst_main_loop = NULL;
@@ -85,15 +88,17 @@ static void notify_java_state(const char *state_name) {
 static void gst_native_log_handler(GstDebugCategory *category, GstDebugLevel level,
     const gchar *file, const gchar *function, gint line,
     GObject *object, GstDebugMessage *message, gpointer user_data) {
-    if (level <= GST_LEVEL_INFO) {
+    if (level <= current_debug_level) {
         const gchar *cat_name = category ? gst_debug_category_get_name(category) : "gst";
         const gchar *msg_text = message ? gst_debug_message_get(message) : NULL;
         if (msg_text != NULL && strlen(msg_text) > 0) {
-            /* Filter out noisy GLib context spam */
-            if (strstr(msg_text, "g_main_context") != NULL || strstr(msg_text, "g_source") != NULL) {
-                return;
+            /* Filter out noisy GLib context spam unless TRACE level */
+            if (current_debug_level < GST_LEVEL_LOG) {
+                if (strstr(msg_text, "g_main_context") != NULL || strstr(msg_text, "g_source") != NULL) {
+                    return;
+                }
             }
-            gchar *full_msg = g_strdup_printf("%s: %s", cat_name ? cat_name : "gst", msg_text);
+            gchar *full_msg = g_strdup_printf("[%s] %s", cat_name ? cat_name : "gst", msg_text);
             LOGI("[GST-LOG] %s", full_msg);
             notify_java_message(full_msg, (level <= GST_LEVEL_WARNING));
             g_free(full_msg);
@@ -130,13 +135,48 @@ static void error_cb(GstBus *bus, GstMessage *msg, gpointer user_data) {
     GError *err = NULL;
     gchar *debug_info = NULL;
     gst_message_parse_error(msg, &err, &debug_info);
-    gchar *msg_str = g_strdup_printf("Element %s error: %s",
-        GST_OBJECT_NAME(msg->src), err ? err->message : "unknown");
-    LOGE("%s (debug: %s)", msg_str, debug_info ? debug_info : "none");
+    gchar *msg_str = g_strdup_printf("ERROR [%s]: %s (%s)",
+        GST_OBJECT_NAME(msg->src), err ? err->message : "unknown", debug_info ? debug_info : "no debug");
+    LOGE("%s", msg_str);
     notify_java_message(msg_str, TRUE);
     g_free(msg_str);
     if (err) g_error_free(err);
     if (debug_info) g_free(debug_info);
+}
+
+static void warning_cb(GstBus *bus, GstMessage *msg, gpointer user_data) {
+    GError *err = NULL;
+    gchar *debug_info = NULL;
+    gst_message_parse_warning(msg, &err, &debug_info);
+    gchar *msg_str = g_strdup_printf("WARNING [%s]: %s (%s)",
+        GST_OBJECT_NAME(msg->src), err ? err->message : "unknown", debug_info ? debug_info : "no debug");
+    LOGW("%s", msg_str);
+    notify_java_message(msg_str, FALSE);
+    g_free(msg_str);
+    if (err) g_error_free(err);
+    if (debug_info) g_free(debug_info);
+}
+
+static void info_cb(GstBus *bus, GstMessage *msg, gpointer user_data) {
+    GError *err = NULL;
+    gchar *debug_info = NULL;
+    gst_message_parse_info(msg, &err, &debug_info);
+    gchar *msg_str = g_strdup_printf("INFO [%s]: %s (%s)",
+        GST_OBJECT_NAME(msg->src), err ? err->message : "unknown", debug_info ? debug_info : "no debug");
+    LOGI("%s", msg_str);
+    notify_java_message(msg_str, FALSE);
+    g_free(msg_str);
+    if (err) g_error_free(err);
+    if (debug_info) g_free(debug_info);
+}
+
+static void buffering_cb(GstBus *bus, GstMessage *msg, gpointer user_data) {
+    gint percent = 0;
+    gst_message_parse_buffering(msg, &percent);
+    gchar *msg_str = g_strdup_printf("Buffering: %d%%", percent);
+    LOGI("%s", msg_str);
+    notify_java_message(msg_str, FALSE);
+    g_free(msg_str);
 }
 
 static void state_changed_cb(GstBus *bus, GstMessage *msg, gpointer user_data) {
@@ -190,6 +230,19 @@ static void ensure_worker_thread(void) {
 }
 
 /*
+ * Set dynamic GStreamer debug log level (2=WARN, 3=INFO, 4=INFO_VERBOSE, 5=DEBUG, 6=LOG)
+ */
+JNIEXPORT void JNICALL
+Java_com_example_gstreamer_GStreamerBridge_nativeSetDebugLevel(JNIEnv *env, jobject thiz, jint level) {
+    current_debug_level = (GstDebugLevel)level;
+    gst_debug_set_default_threshold((GstDebugLevel)level);
+    LOGI("Native GStreamer log threshold updated to level %d", level);
+    gchar *msg = g_strdup_printf("GStreamer native debug verbosity set to level %d", level);
+    notify_java_message(msg, FALSE);
+    g_free(msg);
+}
+
+/*
  * Tutorial 1: Version query
  */
 JNIEXPORT jstring JNICALL
@@ -219,7 +272,7 @@ Java_com_example_gstreamer_GStreamerBridge_nativeCheckGStreamerInit(JNIEnv *env,
     /* Enable GStreamer native debug log routing to UI terminal */
     gst_debug_remove_log_function(NULL);
     gst_debug_add_log_function((GstLogFunction)gst_native_log_handler, NULL, NULL);
-    gst_debug_set_default_threshold(GST_LEVEL_INFO);
+    gst_debug_set_default_threshold(current_debug_level);
 
     ensure_worker_thread();
     return is_initialized ? JNI_TRUE : JNI_FALSE;
@@ -362,6 +415,9 @@ Java_com_example_gstreamer_GStreamerBridge_nativeStartPipeline(JNIEnv *env, jobj
             g_source_unref(bus_source);
 
             g_signal_connect(G_OBJECT(current_bus), "message::error", (GCallback)error_cb, NULL);
+            g_signal_connect(G_OBJECT(current_bus), "message::warning", (GCallback)warning_cb, NULL);
+            g_signal_connect(G_OBJECT(current_bus), "message::info", (GCallback)info_cb, NULL);
+            g_signal_connect(G_OBJECT(current_bus), "message::buffering", (GCallback)buffering_cb, NULL);
             g_signal_connect(G_OBJECT(current_bus), "message::state-changed", (GCallback)state_changed_cb, NULL);
             g_signal_connect(G_OBJECT(current_bus), "message::eos", (GCallback)eos_cb, NULL);
         }
@@ -447,3 +503,4 @@ JNIEXPORT void JNI_OnUnload(JavaVM *vm, void *reserved) {
         pthread_join(gst_worker_thread, NULL);
     }
 }
+
