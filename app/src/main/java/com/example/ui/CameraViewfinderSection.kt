@@ -12,6 +12,8 @@ import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -129,6 +131,7 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
     Column(
         modifier = modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(12.dp)
     ) {
         // Mode Header & Permissions Badge
@@ -312,7 +315,7 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f)
+                    .aspectRatio(16f / 9f)
                     .clip(RoundedCornerShape(8.dp))
                     .background(Color.Black)
                     .border(1.dp, ConsoleBorder, RoundedCornerShape(8.dp))
