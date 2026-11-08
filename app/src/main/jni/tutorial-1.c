@@ -80,6 +80,28 @@ static void notify_java_state(const char *state_name) {
 }
 
 /*
+ * GStreamer native debug log function -> routes GStreamer internal diagnostics directly to UI terminal
+ */
+static void gst_native_log_handler(GstDebugCategory *category, GstDebugLevel level,
+    const gchar *file, const gchar *function, gint line,
+    GObject *object, GstDebugMessage *message, gpointer user_data) {
+    if (level <= GST_LEVEL_INFO) {
+        const gchar *cat_name = category ? gst_debug_category_get_name(category) : "gst";
+        const gchar *msg_text = message ? gst_debug_message_get(message) : NULL;
+        if (msg_text != NULL && strlen(msg_text) > 0) {
+            /* Filter out noisy GLib context spam if any */
+            if (strstr(msg_text, "g_main_context") != NULL || strstr(msg_text, "g_source") != NULL) {
+                return;
+            }
+            gchar *full_msg = g_strdup_printf("%s: %s", cat_name ? cat_name : "gst", msg_text);
+            LOGI("[GST-LOG] %s", full_msg);
+            notify_java_message(full_msg, (level <= GST_LEVEL_WARNING));
+            g_free(full_msg);
+        }
+    }
+}
+
+/*
  * Bus sync handler to capture 'prepare-window-handle' messages
  * and automatically bind the ANativeWindow to the video sink.
  * CRITICAL: MUST ONLY lock window_mutex (NEVER pipeline_mutex) to avoid self-deadlock.
@@ -194,6 +216,12 @@ Java_com_example_gstreamer_GStreamerBridge_nativeCheckGStreamerInit(JNIEnv *env,
         g_error_free(error);
         return JNI_FALSE;
     }
+    
+    /* Enable GStreamer native debug log routing to UI terminal */
+    gst_debug_remove_log_function(NULL);
+    gst_debug_add_log_function((GstLogFunction)gst_native_log_handler, NULL, NULL);
+    gst_debug_set_default_threshold(GST_LEVEL_INFO);
+
     ensure_worker_thread();
     return is_initialized ? JNI_TRUE : JNI_FALSE;
 }
