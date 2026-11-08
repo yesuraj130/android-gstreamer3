@@ -75,10 +75,11 @@ val DEFAULT_PRESETS = listOf(
     PipelinePreset("Bouncing Ball", "videotestsrc pattern=ball ! videoconvert ! autovideosink"),
     PipelinePreset("Camera (ahcsrc)", "ahcsrc device=0 ! queue max-size-buffers=1 leaky=downstream ! videoflip method=clockwise ! videoconvert ! glimagesink sync=false"),
     PipelinePreset("RTSP Loopback (playbin)", "playbin uri=rtsp://127.0.0.1:8554/live"),
+    PipelinePreset("RTSP Loopback (uridecodebin)", "uridecodebin uri=rtsp://127.0.0.1:8554/live source::protocols=tcp ! videoconvert ! glimagesink sync=false"),
     PipelinePreset("RTSP Local Loopback (127.0.0.1)", "rtspsrc location=rtsp://127.0.0.1:8554/live protocols=tcp latency=100 ! rtph264depay ! h264parse ! decodebin ! glimagesink sync=false"),
     PipelinePreset("RTSP Local Network (TCP)", "rtspsrc location=rtsp://192.168.1.105:8554/live protocols=tcp latency=100 ! rtph264depay ! h264parse ! decodebin ! glimagesink sync=false"),
-    PipelinePreset("RTSP (rtspsrc + TCP)", "rtspsrc location=rtsp://rtspstream.com/pattern protocols=tcp latency=100 ! rtph264depay ! h264parse ! decodebin ! videoconvert ! autovideosink"),
-    PipelinePreset("RTSP (uridecodebin + TCP)", "uridecodebin uri=rtsp://rtspstream.com/pattern source::protocols=tcp ! videoconvert ! autovideosink"),
+    PipelinePreset("RTSP Public (rtspsrc + TCP)", "rtspsrc location=rtsp://rtspstream.com/pattern protocols=tcp latency=100 ! rtph264depay ! h264parse ! decodebin ! videoconvert ! autovideosink"),
+    PipelinePreset("RTSP Public (uridecodebin + TCP)", "uridecodebin uri=rtsp://rtspstream.com/pattern source::protocols=tcp ! videoconvert ! autovideosink"),
     PipelinePreset("HTTP MP4 (playbin)", "playbin uri=http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"),
     PipelinePreset("HTTP MP4 (souphttpsrc)", "souphttpsrc location=http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4 user-agent=\"Mozilla/5.0\" ! qtdemux ! h264parse ! decodebin ! videoconvert ! autovideosink"),
     PipelinePreset("Snow Noise", "videotestsrc pattern=snow ! videoconvert ! autovideosink")
@@ -89,7 +90,8 @@ fun VideoPipelineSection(modifier: Modifier = Modifier) {
     val scope = rememberCoroutineScope()
     val isPlaying by GStreamerBridge.isPlaying.collectAsState()
     val currentDebugLevel by GStreamerBridge.debugLevel.collectAsState()
-    var pipelineText by remember { mutableStateOf("videotestsrc ! videoconvert ! autovideosink") }
+    var pipelineText by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("videotestsrc ! videoconvert ! autovideosink") }
+    var currentHolder by remember { mutableStateOf<SurfaceHolder?>(null) }
 
     Column(
         modifier = modifier
@@ -166,10 +168,12 @@ fun VideoPipelineSection(modifier: Modifier = Modifier) {
                     SurfaceView(context).apply {
                         holder.addCallback(object : SurfaceHolder.Callback {
                             override fun surfaceCreated(holder: SurfaceHolder) {
+                                currentHolder = holder
                                 GStreamerBridge.setSurface(holder.surface)
                             }
 
                             override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+                                currentHolder = holder
                                 GStreamerBridge.appendLog(
                                     LogLevel.INFO,
                                     "SURFACE",
@@ -179,6 +183,9 @@ fun VideoPipelineSection(modifier: Modifier = Modifier) {
                             }
 
                             override fun surfaceDestroyed(holder: SurfaceHolder) {
+                                if (currentHolder == holder) {
+                                    currentHolder = null
+                                }
                                 GStreamerBridge.clearSurface()
                             }
                         })
@@ -399,6 +406,11 @@ fun VideoPipelineSection(modifier: Modifier = Modifier) {
             Button(
                 onClick = {
                     scope.launch {
+                        currentHolder?.surface?.let { surf ->
+                            if (surf.isValid) {
+                                GStreamerBridge.setSurface(surf)
+                            }
+                        }
                         GStreamerBridge.startPipeline(pipelineText)
                     }
                 },

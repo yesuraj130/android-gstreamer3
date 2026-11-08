@@ -170,37 +170,16 @@ fun MainScreen(modifier: Modifier = Modifier) {
             )
         }
 
-        // All 3 Tabs kept continuously active in memory to avoid unmounting or losing state
+        // Active Tab Screen Content
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .weight(1f)
         ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .alpha(if (selectedTabIndex == 0) 1f else 0f)
-                    .zIndex(if (selectedTabIndex == 0) 1f else 0f)
-            ) {
-                VideoPipelineSection()
-            }
-
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .alpha(if (selectedTabIndex == 1) 1f else 0f)
-                    .zIndex(if (selectedTabIndex == 1) 1f else 0f)
-            ) {
-                CameraViewfinderSection()
-            }
-
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .alpha(if (selectedTabIndex == 2) 1f else 0f)
-                    .zIndex(if (selectedTabIndex == 2) 1f else 0f)
-            ) {
-                TerminalLogViewer()
+            when (selectedTabIndex) {
+                0 -> VideoPipelineSection()
+                1 -> CameraViewfinderSection()
+                2 -> TerminalLogViewer()
             }
         }
     }
