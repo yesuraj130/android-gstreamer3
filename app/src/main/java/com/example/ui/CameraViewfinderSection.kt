@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.util.Log
 import android.widget.Toast
+import java.util.Locale
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
@@ -132,11 +133,31 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
     var rtspPort by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("8554") }
     var rtspPath by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("/live") }
     var rtspEncoderPref by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("auto") } // "auto", "hardware", "software"
-    var rtspResolution by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("1440x1080") } // "1440x1080" (Full Sensor 4:3 - No Crop), "1920x1440", "1280x720", "1920x1080"
+    var rtspResolution by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("1440x1080") }
     var viewportRatioOverride by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("auto") } // "auto", "3:4", "9:16", "16:9", "4:3"
     val isRtspRunning by GStreamerBridge.isRtspServerRunning.collectAsState()
     val rtspUrl by GStreamerBridge.rtspServerUrl.collectAsState()
     val availableEncoders by GStreamerBridge.availableEncoders.collectAsState()
+    val availableCameras = remember { CameraHardwareInspector.getAvailableCameraDevices(context) }
+
+    var cameraProfile by remember(gstAhcDevice) {
+        mutableStateOf(CameraHardwareInspector.inspectCamera(context, gstAhcDevice))
+    }
+
+    LaunchedEffect(gstAhcDevice) {
+        val prof = CameraHardwareInspector.inspectCamera(context, gstAhcDevice)
+        cameraProfile = prof
+        prof?.optimalFullSensorSize?.let { opt ->
+            rtspResolution = "${opt.width}x${opt.height}"
+        }
+        prof?.let { p ->
+            GStreamerBridge.appendLog(
+                LogLevel.INFO,
+                "SENSOR",
+                "Hardware Sensor: ${p.facing} Camera ${p.sensorWidth}x${p.sensorHeight} (${String.format(Locale.US, "%.1f", p.sensorMegaPixels)} MP, ${p.fullSensorRatioLabel}). Uncropped preview: ${p.optimalFullSensorSize?.width}x${p.optimalFullSensorSize?.height}"
+            )
+        }
+    }
 
     LaunchedEffect(Unit) {
         GStreamerBridge.queryAvailableEncoders()
@@ -569,7 +590,7 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
 
             // GStreamer ahcsrc & RTSP Controls Section
             if (cameraMode == CameraEngineMode.GSTREAMER_AHCSRC) {
-                // Device Index Selector (Back / Front / Auto)
+                // Camera Lens Selector (Main, Ultra-Wide, Telephoto, Front, Auto)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -578,36 +599,51 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Text(
-                        text = "Camera:",
+                        text = "Camera Lens:",
                         color = ColorCmd,
                         fontFamily = FontFamily.Monospace,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold
                     )
 
-                    FilterChip(
-                        selected = gstAhcDevice == 0,
-                        onClick = { gstAhcDevice = 0 },
-                        label = { Text("Back (device=0)", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
-                        colors = FilterChipDefaults.filterChipColors(
-                            containerColor = ConsoleSurface,
-                            labelColor = ColorText,
-                            selectedContainerColor = Color(0xFF1F6FEB),
-                            selectedLabelColor = Color.White
+                    if (availableCameras.isNotEmpty()) {
+                        for (cam in availableCameras) {
+                            FilterChip(
+                                selected = gstAhcDevice == cam.deviceIndex,
+                                onClick = { gstAhcDevice = cam.deviceIndex },
+                                label = { Text(cam.label, fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    containerColor = ConsoleSurface,
+                                    labelColor = ColorText,
+                                    selectedContainerColor = Color(0xFF1F6FEB),
+                                    selectedLabelColor = Color.White
+                                )
+                            )
+                        }
+                    } else {
+                        FilterChip(
+                            selected = gstAhcDevice == 0,
+                            onClick = { gstAhcDevice = 0 },
+                            label = { Text("Back Main (device=0)", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                containerColor = ConsoleSurface,
+                                labelColor = ColorText,
+                                selectedContainerColor = Color(0xFF1F6FEB),
+                                selectedLabelColor = Color.White
+                            )
                         )
-                    )
-
-                    FilterChip(
-                        selected = gstAhcDevice == 1,
-                        onClick = { gstAhcDevice = 1 },
-                        label = { Text("Front (device=1)", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
-                        colors = FilterChipDefaults.filterChipColors(
-                            containerColor = ConsoleSurface,
-                            labelColor = ColorText,
-                            selectedContainerColor = Color(0xFF1F6FEB),
-                            selectedLabelColor = Color.White
+                        FilterChip(
+                            selected = gstAhcDevice == 1,
+                            onClick = { gstAhcDevice = 1 },
+                            label = { Text("Front (device=1)", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                containerColor = ConsoleSurface,
+                                labelColor = ColorText,
+                                selectedContainerColor = Color(0xFF1F6FEB),
+                                selectedLabelColor = Color.White
+                            )
                         )
-                    )
+                    }
 
                     FilterChip(
                         selected = gstAhcDevice == -1,
@@ -832,81 +868,104 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
                             fontSize = 11.sp
                         )
 
-                        // Stream Resolution Selector (Full 4:3 sensor options with zero crop)
+                        // Detected Physical Hardware Sensor Banner
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            color = Color.Black.copy(alpha = 0.5f),
+                            shape = RoundedCornerShape(4.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, ConsoleBorder)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Hardware Sensor (CameraManager):",
+                                        color = ColorCmd,
+                                        fontSize = 11.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    cameraProfile?.let { prof ->
+                                        Text(
+                                            text = "${prof.facing} (${String.format(Locale.US, "%.1f", prof.sensorMegaPixels)} MP)",
+                                            color = ColorSuccess,
+                                            fontSize = 10.sp,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                                cameraProfile?.let { prof ->
+                                    Text(
+                                        text = "• Active Array: ${prof.sensorWidth}x${prof.sensorHeight} (${prof.fullSensorRatioLabel})\n• Queried dynamically from Android Camera HAL with zero hardcoded values.",
+                                        color = ColorText,
+                                        fontSize = 10.sp,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+                            }
+                        }
+
+                        // Stream Resolution Selector (Dynamic from hardware CameraManager)
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text(
-                                text = "Camera Resolution (4:3 uses full sensor with ZERO cropping):",
+                                text = "Camera Resolutions (Queried Live from Driver):",
                                 color = ColorCmd,
                                 fontFamily = FontFamily.Monospace,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.SemiBold
                             )
+                            val supportedList = cameraProfile?.supportedPreviewSizes ?: emptyList()
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .horizontalScroll(rememberScrollState()),
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                FilterChip(
-                                    selected = rtspResolution == "1440x1080",
-                                    onClick = { rtspResolution = "1440x1080" },
-                                    enabled = !isRtspRunning,
-                                    label = { Text("⚡ Full Sensor 4:3 (1440x1080 - No Crop)", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
-                                    colors = FilterChipDefaults.filterChipColors(
-                                        containerColor = ConsoleSurface,
-                                        labelColor = ColorText,
-                                        selectedContainerColor = Color(0xFF1F6FEB),
-                                        selectedLabelColor = Color.White
-                                    )
-                                )
-                                FilterChip(
-                                    selected = rtspResolution == "1920x1440",
-                                    onClick = { rtspResolution = "1920x1440" },
-                                    enabled = !isRtspRunning,
-                                    label = { Text("Full Sensor 4:3 Max (1920x1440)", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
-                                    colors = FilterChipDefaults.filterChipColors(
-                                        containerColor = ConsoleSurface,
-                                        labelColor = ColorText,
-                                        selectedContainerColor = Color(0xFF1F6FEB),
-                                        selectedLabelColor = Color.White
-                                    )
-                                )
-                                FilterChip(
-                                    selected = rtspResolution == "1280x960",
-                                    onClick = { rtspResolution = "1280x960" },
-                                    enabled = !isRtspRunning,
-                                    label = { Text("Full Sensor 4:3 SD (1280x960)", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
-                                    colors = FilterChipDefaults.filterChipColors(
-                                        containerColor = ConsoleSurface,
-                                        labelColor = ColorText,
-                                        selectedContainerColor = Color(0xFF1F6FEB),
-                                        selectedLabelColor = Color.White
-                                    )
-                                )
-                                FilterChip(
-                                    selected = rtspResolution == "1280x720" || rtspResolution == "720p",
-                                    onClick = { rtspResolution = "1280x720" },
-                                    enabled = !isRtspRunning,
-                                    label = { Text("16:9 Widescreen (1280x720)", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
-                                    colors = FilterChipDefaults.filterChipColors(
-                                        containerColor = ConsoleSurface,
-                                        labelColor = ColorText,
-                                        selectedContainerColor = Color(0xFF1F6FEB),
-                                        selectedLabelColor = Color.White
-                                    )
-                                )
-                                FilterChip(
-                                    selected = rtspResolution == "1920x1080" || rtspResolution == "1080p",
-                                    onClick = { rtspResolution = "1920x1080" },
-                                    enabled = !isRtspRunning,
-                                    label = { Text("16:9 Widescreen (1920x1080)", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
-                                    colors = FilterChipDefaults.filterChipColors(
-                                        containerColor = ConsoleSurface,
-                                        labelColor = ColorText,
-                                        selectedContainerColor = Color(0xFF1F6FEB),
-                                        selectedLabelColor = Color.White
-                                    )
-                                )
+                                if (supportedList.isNotEmpty()) {
+                                    for (item in supportedList.take(8)) {
+                                        val key = "${item.width}x${item.height}"
+                                        FilterChip(
+                                            selected = rtspResolution == key,
+                                            onClick = { rtspResolution = key },
+                                            enabled = !isRtspRunning,
+                                            label = {
+                                                Text(
+                                                    text = if (item.isFullSensorMatch) "⚡ $key (Full Sensor)" else if (item.is169) "$key (16:9)" else key,
+                                                    fontFamily = FontFamily.Monospace,
+                                                    fontSize = 10.sp
+                                                )
+                                            },
+                                            colors = FilterChipDefaults.filterChipColors(
+                                                containerColor = ConsoleSurface,
+                                                labelColor = ColorText,
+                                                selectedContainerColor = Color(0xFF1F6FEB),
+                                                selectedLabelColor = Color.White
+                                            )
+                                        )
+                                    }
+                                } else {
+                                    listOf("1440x1080", "1920x1440", "1280x960", "1280x720", "1920x1080").forEach { res ->
+                                        FilterChip(
+                                            selected = rtspResolution == res,
+                                            onClick = { rtspResolution = res },
+                                            enabled = !isRtspRunning,
+                                            label = { Text(res, fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
+                                            colors = FilterChipDefaults.filterChipColors(
+                                                containerColor = ConsoleSurface,
+                                                labelColor = ColorText,
+                                                selectedContainerColor = Color(0xFF1F6FEB),
+                                                selectedLabelColor = Color.White
+                                            )
+                                        )
+                                    }
+                                }
                             }
                         }
 
