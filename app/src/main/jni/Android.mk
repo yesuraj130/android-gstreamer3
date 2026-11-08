@@ -43,7 +43,6 @@ GSTREAMER_PLUGINS := \
     $(GSTREAMER_PLUGINS_SYS) \
     $(GSTREAMER_PLUGINS_NET) \
     $(GSTREAMER_PLUGINS_NET_RESTRICTED) \
-    glibnetworking \
     typefindfunctions \
     videoparsersbad \
     audioparsers \
