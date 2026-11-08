@@ -515,11 +515,11 @@ Java_com_example_gstreamer_GStreamerBridge_nativeStartRtspServer(JNIEnv *env, jo
     }
 
     /* Build factory pipeline string:
-     * ( ahcsrc device=0 ! queue max-size-buffers=1 leaky=downstream ! videoflip method=clockwise ! videoconvert ! amcvideoenc_h264 ! rtph264pay name=pay0 pt=96 config-interval=1 )
+     * ( ahcsrc device=0 ! queue max-size-buffers=1 leaky=downstream ! videoflip method=clockwise ! videoconvert ! amcvideoenc_h264 ! h264parse ! rtph264pay name=pay0 pt=96 config-interval=1 )
      */
     char launch_str[1024];
     snprintf(launch_str, sizeof(launch_str),
-        "( ahcsrc %s ! queue max-size-buffers=1 leaky=downstream %s! videoconvert ! amcvideoenc_h264 ! rtph264pay name=pay0 pt=96 config-interval=1 )",
+        "( ahcsrc %s ! queue max-size-buffers=1 leaky=downstream %s! videoconvert ! amcvideoenc_h264 ! h264parse ! rtph264pay name=pay0 pt=96 config-interval=1 )",
         device_str, rotation_str);
 
     LOGI("Creating GstRTSPServer on port %s, path %s, pipeline: %s", port ? port : "8554", path ? path : "/live", launch_str);
