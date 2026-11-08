@@ -77,7 +77,7 @@ val DEFAULT_PRESETS = listOf(
     PipelinePreset("RTSP Buffered (playbin)", "playbin uri=rtsp://127.0.0.1:8554/live"),
     PipelinePreset("Color Bars", "videotestsrc ! videoconvert ! autovideosink"),
     PipelinePreset("Bouncing Ball", "videotestsrc pattern=ball ! videoconvert ! autovideosink"),
-    PipelinePreset("Camera (ahcsrc)", "ahcsrc device=0 ! queue max-size-buffers=1 leaky=downstream ! videoflip method=clockwise ! videoconvert ! glimagesink sync=false"),
+    PipelinePreset("Camera (ahcsrc 4:3 Full Sensor)", "ahcsrc device=0 ! video/x-raw,width=1440,height=1080 ! queue max-size-buffers=1 leaky=downstream ! videoflip method=clockwise ! videoconvert ! glimagesink sync=false"),
     PipelinePreset("RTSP Local Network (TCP)", "rtspsrc location=rtsp://192.168.1.105:8554/live protocols=tcp latency=50 buffer-mode=none drop-on-latency=true ! rtph264depay ! h264parse ! decodebin ! glimagesink sync=false"),
     PipelinePreset("RTSP Public Stream", "rtspsrc location=rtsp://rtspstream.com/pattern protocols=tcp latency=100 ! rtph264depay ! h264parse ! decodebin ! videoconvert ! autovideosink"),
     PipelinePreset("HTTP MP4 (playbin)", "playbin uri=http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"),

@@ -132,7 +132,8 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
     var rtspPort by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("8554") }
     var rtspPath by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("/live") }
     var rtspEncoderPref by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("auto") } // "auto", "hardware", "software"
-    var rtspResolution by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("720p") } // "720p", "1080p", "480p", "native"
+    var rtspResolution by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("1440x1080") } // "1440x1080" (Full Sensor 4:3 - No Crop), "1920x1440", "1280x720", "1920x1080"
+    var viewportRatioOverride by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("auto") } // "auto", "3:4", "9:16", "16:9", "4:3"
     val isRtspRunning by GStreamerBridge.isRtspServerRunning.collectAsState()
     val rtspUrl by GStreamerBridge.rtspServerUrl.collectAsState()
     val availableEncoders by GStreamerBridge.availableEncoders.collectAsState()
@@ -332,11 +333,91 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
                 )
             }
 
-            // Camera Viewfinder Video Box (Fixed 16:9 Aspect Ratio)
+            val isPortraitRotation = gstRotationMethod == "clockwise" || gstRotationMethod == "counterclockwise"
+            val is43 = rtspResolution.contains("1440") || rtspResolution.contains("1920x1440") || rtspResolution.contains("1280x960") || rtspResolution == "full_sensor" || rtspResolution == "4:3"
+            val computedRatio = if (isPortraitRotation) {
+                if (is43) 3f / 4f else 9f / 16f
+            } else {
+                if (is43) 4f / 3f else 16f / 9f
+            }
+            val activeBoxRatio = when (viewportRatioOverride) {
+                "3:4" -> 3f / 4f
+                "9:16" -> 9f / 16f
+                "16:9" -> 16f / 9f
+                "4:3" -> 4f / 3f
+                else -> computedRatio
+            }
+
+            // Viewport Aspect Ratio Selector
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(
+                    text = "Viewfinder:",
+                    color = ColorCmd,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+
+                FilterChip(
+                    selected = viewportRatioOverride == "auto",
+                    onClick = { viewportRatioOverride = "auto" },
+                    label = { Text("Auto (${if (isPortraitRotation) (if (is43) "3:4 Portrait" else "9:16 Portrait") else (if (is43) "4:3 Landscape" else "16:9 Landscape")})", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        containerColor = ConsoleSurface,
+                        labelColor = ColorText,
+                        selectedContainerColor = Color(0xFF1F6FEB),
+                        selectedLabelColor = Color.White
+                    )
+                )
+
+                FilterChip(
+                    selected = viewportRatioOverride == "3:4",
+                    onClick = { viewportRatioOverride = "3:4" },
+                    label = { Text("3:4 Portrait (Full Sensor)", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        containerColor = ConsoleSurface,
+                        labelColor = ColorText,
+                        selectedContainerColor = Color(0xFF1F6FEB),
+                        selectedLabelColor = Color.White
+                    )
+                )
+
+                FilterChip(
+                    selected = viewportRatioOverride == "16:9",
+                    onClick = { viewportRatioOverride = "16:9" },
+                    label = { Text("16:9 Widescreen", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        containerColor = ConsoleSurface,
+                        labelColor = ColorText,
+                        selectedContainerColor = Color(0xFF1F6FEB),
+                        selectedLabelColor = Color.White
+                    )
+                )
+
+                FilterChip(
+                    selected = viewportRatioOverride == "4:3",
+                    onClick = { viewportRatioOverride = "4:3" },
+                    label = { Text("4:3 Landscape", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        containerColor = ConsoleSurface,
+                        labelColor = ColorText,
+                        selectedContainerColor = Color(0xFF1F6FEB),
+                        selectedLabelColor = Color.White
+                    )
+                )
+            }
+
+            // Camera Viewfinder Video Box (Adaptive Full Sensor Aspect Ratio)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .aspectRatio(16f / 9f)
+                    .aspectRatio(activeBoxRatio)
                     .clip(RoundedCornerShape(8.dp))
                     .background(Color.Black)
                     .border(1.dp, ConsoleBorder, RoundedCornerShape(8.dp))
@@ -346,7 +427,7 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
                         AndroidView(
                             factory = { ctx ->
                                 PreviewView(ctx).apply {
-                                    scaleType = PreviewView.ScaleType.FILL_CENTER
+                                    scaleType = PreviewView.ScaleType.FIT_CENTER
                                 }
                             },
                             update = { previewView ->
@@ -614,10 +695,22 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
                                 GStreamerBridge.stopPipeline()
                                 delay(150) // Allow Android CameraManager HAL to finalize session close
 
-                                // 3. Build zero-latency ahcsrc pipeline with leaky queue & videoflip rotation
+                                // 3. Build zero-latency ahcsrc pipeline with full sensor caps & leaky queue
                                 val devParam = if (gstAhcDevice >= 0) "device=$gstAhcDevice " else ""
                                 val flipParam = if (gstRotationMethod != "none") "! videoflip method=$gstRotationMethod " else ""
-                                val pipelineStr = "ahcsrc ${devParam}! queue max-size-buffers=1 leaky=downstream ${flipParam}! videoconvert ! glimagesink sync=false"
+                                val resParts = rtspResolution.split("x")
+                                val capsParam = if (resParts.size == 2 && resParts[0].toIntOrNull() != null && resParts[1].toIntOrNull() != null) {
+                                    "! video/x-raw,width=${resParts[0]},height=${resParts[1]} "
+                                } else if (rtspResolution == "720p") {
+                                    "! video/x-raw,width=1280,height=720 "
+                                } else if (rtspResolution == "1080p") {
+                                    "! video/x-raw,width=1920,height=1080 "
+                                } else if (rtspResolution == "480p") {
+                                    "! video/x-raw,width=854,height=480 "
+                                } else {
+                                    "! video/x-raw,width=1440,height=1080 "
+                                }
+                                val pipelineStr = "ahcsrc ${devParam}${capsParam}! queue max-size-buffers=1 leaky=downstream ${flipParam}! videoconvert ! glimagesink sync=false"
 
                                 GStreamerBridge.startPipeline(pipelineStr)
                                 isGstCameraActive = true
@@ -739,10 +832,10 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
                             fontSize = 11.sp
                         )
 
-                        // Stream Resolution Selector (720p low-latency default)
+                        // Stream Resolution Selector (Full 4:3 sensor options with zero crop)
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text(
-                                text = "Stream Resolution (720p recommended for lowest latency):",
+                                text = "Camera Resolution (4:3 uses full sensor with ZERO cropping):",
                                 color = ColorCmd,
                                 fontFamily = FontFamily.Monospace,
                                 fontSize = 11.sp,
@@ -755,10 +848,10 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 FilterChip(
-                                    selected = rtspResolution == "720p",
-                                    onClick = { rtspResolution = "720p" },
+                                    selected = rtspResolution == "1440x1080",
+                                    onClick = { rtspResolution = "1440x1080" },
                                     enabled = !isRtspRunning,
-                                    label = { Text("⚡ 720p (Low Latency)", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
+                                    label = { Text("⚡ Full Sensor 4:3 (1440x1080 - No Crop)", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
                                     colors = FilterChipDefaults.filterChipColors(
                                         containerColor = ConsoleSurface,
                                         labelColor = ColorText,
@@ -767,10 +860,10 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
                                     )
                                 )
                                 FilterChip(
-                                    selected = rtspResolution == "480p",
-                                    onClick = { rtspResolution = "480p" },
+                                    selected = rtspResolution == "1920x1440",
+                                    onClick = { rtspResolution = "1920x1440" },
                                     enabled = !isRtspRunning,
-                                    label = { Text("480p (Fastest)", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
+                                    label = { Text("Full Sensor 4:3 Max (1920x1440)", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
                                     colors = FilterChipDefaults.filterChipColors(
                                         containerColor = ConsoleSurface,
                                         labelColor = ColorText,
@@ -779,10 +872,10 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
                                     )
                                 )
                                 FilterChip(
-                                    selected = rtspResolution == "1080p",
-                                    onClick = { rtspResolution = "1080p" },
+                                    selected = rtspResolution == "1280x960",
+                                    onClick = { rtspResolution = "1280x960" },
                                     enabled = !isRtspRunning,
-                                    label = { Text("1080p (FHD)", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
+                                    label = { Text("Full Sensor 4:3 SD (1280x960)", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
                                     colors = FilterChipDefaults.filterChipColors(
                                         containerColor = ConsoleSurface,
                                         labelColor = ColorText,
@@ -791,10 +884,22 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
                                     )
                                 )
                                 FilterChip(
-                                    selected = rtspResolution == "native",
-                                    onClick = { rtspResolution = "native" },
+                                    selected = rtspResolution == "1280x720" || rtspResolution == "720p",
+                                    onClick = { rtspResolution = "1280x720" },
                                     enabled = !isRtspRunning,
-                                    label = { Text("Native Sensor", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
+                                    label = { Text("16:9 Widescreen (1280x720)", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        containerColor = ConsoleSurface,
+                                        labelColor = ColorText,
+                                        selectedContainerColor = Color(0xFF1F6FEB),
+                                        selectedLabelColor = Color.White
+                                    )
+                                )
+                                FilterChip(
+                                    selected = rtspResolution == "1920x1080" || rtspResolution == "1080p",
+                                    onClick = { rtspResolution = "1920x1080" },
+                                    enabled = !isRtspRunning,
+                                    label = { Text("16:9 Widescreen (1920x1080)", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
                                     colors = FilterChipDefaults.filterChipColors(
                                         containerColor = ConsoleSurface,
                                         labelColor = ColorText,

@@ -626,16 +626,25 @@ Java_com_example_gstreamer_GStreamerBridge_nativeStartRtspServer(JNIEnv *env, jo
         snprintf(rotation_str, sizeof(rotation_str), "! videoflip method=%s ", rotation);
     }
 
-    /* Resolution caps filter for low-latency bandwidth reduction */
+    /* Resolution caps filter: enforce 4:3 full sensor dimensions (e.g. 1440x1080) to prevent square cropping */
     char res_caps[128] = "";
-    if (resolution != NULL) {
-        if (strcmp(resolution, "720p") == 0) {
+    int rw = 0, rh = 0;
+    if (resolution != NULL && sscanf(resolution, "%dx%d", &rw, &rh) == 2 && rw > 0 && rh > 0) {
+        snprintf(res_caps, sizeof(res_caps), "! video/x-raw,width=%d,height=%d,framerate=30/1 ", rw, rh);
+    } else if (resolution != NULL) {
+        if (strcmp(resolution, "full_sensor") == 0 || strcmp(resolution, "4:3") == 0 || strcmp(resolution, "native") == 0) {
+            /* Full Sensor 4:3 native dimensions - 1440x1080 avoids square crop on all devices */
+            snprintf(res_caps, sizeof(res_caps), "! video/x-raw,width=1440,height=1080,framerate=30/1 ");
+        } else if (strcmp(resolution, "720p") == 0) {
             snprintf(res_caps, sizeof(res_caps), "! video/x-raw,width=1280,height=720,framerate=30/1 ");
         } else if (strcmp(resolution, "1080p") == 0) {
             snprintf(res_caps, sizeof(res_caps), "! video/x-raw,width=1920,height=1080,framerate=30/1 ");
         } else if (strcmp(resolution, "480p") == 0) {
             snprintf(res_caps, sizeof(res_caps), "! video/x-raw,width=854,height=480,framerate=30/1 ");
         }
+    } else {
+        /* Default: Full 4:3 Sensor 1440x1080 (no crop) */
+        snprintf(res_caps, sizeof(res_caps), "! video/x-raw,width=1440,height=1080,framerate=30/1 ");
     }
 
     char *chosen_name = NULL;
@@ -649,12 +658,12 @@ Java_com_example_gstreamer_GStreamerBridge_nativeStartRtspServer(JNIEnv *env, jo
         snprintf(current_active_encoder_name, sizeof(current_active_encoder_name), "x264enc (Software)");
     }
 
-    /* Build factory pipeline string with 0-latency leaky queue & MTU 1400:
-     * ( ahcsrc device=0 ! queue max-size-buffers=1 max-size-time=0 max-size-bytes=0 leaky=downstream <res_caps> <rotation_str> ! <enc_fragment> ! h264parse ! rtph264pay name=pay0 pt=96 config-interval=1 mtu=1400 )
+    /* Build factory pipeline string with 0-latency leaky queue, MTU 1400, and full sensor caps:
+     * ( ahcsrc device=0 ! <res_caps> ! queue max-size-buffers=1 max-size-time=0 max-size-bytes=0 leaky=downstream <rotation_str> ! <enc_fragment> ! h264parse ! rtph264pay name=pay0 pt=96 config-interval=1 mtu=1400 )
      */
     char launch_str[1024];
     snprintf(launch_str, sizeof(launch_str),
-        "( ahcsrc %s ! queue max-size-buffers=1 max-size-time=0 max-size-bytes=0 leaky=downstream %s%s! %s ! h264parse ! rtph264pay name=pay0 pt=96 config-interval=1 mtu=1400 )",
+        "( ahcsrc %s %s! queue max-size-buffers=1 max-size-time=0 max-size-bytes=0 leaky=downstream %s! %s ! h264parse ! rtph264pay name=pay0 pt=96 config-interval=1 mtu=1400 )",
         device_str, res_caps, rotation_str,
         enc_fragment ? enc_fragment : "videoconvert ! x264enc tune=zerolatency speed-preset=ultrafast");
 
