@@ -1,8 +1,12 @@
 package com.example.ui
 
 import android.Manifest
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.pm.PackageManager
 import android.util.Log
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
@@ -13,8 +17,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,13 +30,18 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Cameraswitch
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Router
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Videocam
@@ -45,11 +52,13 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -63,15 +72,18 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.gstreamer.GStreamerBridge
+import com.example.gstreamer.LogLevel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 private val ConsoleSurface = Color(0xFF161B22)
@@ -116,6 +128,12 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
     var gstAhcDevice by remember { mutableStateOf(0) } // 0 = Back, 1 = Front, -1 = Auto
     var gstRotationMethod by remember { mutableStateOf("clockwise") } // "clockwise" = 90° CW (default for portrait)
 
+    // RTSP Server Configuration states
+    var rtspPort by remember { mutableStateOf("8554") }
+    var rtspPath by remember { mutableStateOf("/live") }
+    val isRtspRunning by GStreamerBridge.isRtspServerRunning.collectAsState()
+    val rtspUrl by GStreamerBridge.rtspServerUrl.collectAsState()
+
     // Unbind CameraX whenever switching to GStreamer ahcsrc mode to release camera hardware lock
     LaunchedEffect(cameraMode) {
         if (cameraMode == CameraEngineMode.GSTREAMER_AHCSRC) {
@@ -134,9 +152,10 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
         modifier = modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(12.dp)
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        // Mode Header & Permissions Badge
+        // Compact Top Header Banner & Permissions Status
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
@@ -161,7 +180,7 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "Camera Viewfinder",
+                        text = "Hardware Camera & RTSP Stream",
                         color = ColorText,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold,
@@ -179,14 +198,12 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
             }
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // If permissions missing -> Permission Request UI
+        // If permissions missing -> Permission Request Card
         if (!hasCameraPermission || !hasMicPermission) {
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 16.dp),
+                    .padding(vertical = 12.dp),
                 colors = CardDefaults.cardColors(containerColor = ConsoleSurface),
                 border = androidx.compose.foundation.BorderStroke(1.dp, ConsoleBorder)
             ) {
@@ -210,7 +227,7 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "Grant camera and audio permissions to display the live viewfinder preview and prepare for RTSP streaming.",
+                        text = "Grant camera and audio permissions to display the live viewfinder preview and enable GStreamer RTSP streaming.",
                         color = ColorText,
                         fontFamily = FontFamily.Monospace,
                         fontSize = 11.sp,
@@ -228,7 +245,7 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
                             )
                         },
                         modifier = Modifier
-                            .fillMaxWidth(0.8f)
+                            .fillMaxWidth(0.85f)
                             .height(44.dp)
                             .testTag("request_camera_mic_permissions_button"),
                         shape = RoundedCornerShape(6.dp),
@@ -253,10 +270,13 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
                 }
             }
         } else {
-            // Permissions granted -> Engine Selector Tabs
+            // Engine Selector Chips Row
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 FilterChip(
                     selected = cameraMode == CameraEngineMode.CAMERAX_VIEWFINDER,
@@ -290,7 +310,7 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
                     },
                     label = {
                         Text(
-                            text = "GStreamer Capture (ahcsrc)",
+                            text = "GStreamer Capture & RTSP Server",
                             fontFamily = FontFamily.Monospace,
                             fontSize = 11.sp
                         )
@@ -305,9 +325,7 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
                 )
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Camera Viewfinder Box
+            // Camera Viewfinder Video Box (Fixed 16:9 Aspect Ratio)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -401,12 +419,17 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
                             modifier = Modifier
                                 .size(8.dp)
                                 .clip(CircleShape)
-                                .background(ColorSuccess)
+                                .background(if (isRtspRunning || isGstCameraActive) ColorSuccess else ColorCmd)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = if (cameraMode == CameraEngineMode.CAMERAX_VIEWFINDER) "CAMERAX: LIVE VIEWFINDER" else "GSTREAMER: AHCSRC ACTIVE",
-                            color = ColorSuccess,
+                            text = when {
+                                cameraMode == CameraEngineMode.CAMERAX_VIEWFINDER -> "CAMERAX: LIVE VIEWFINDER"
+                                isRtspRunning -> "RTSP SERVER: BROADCASTING LIVE"
+                                isGstCameraActive -> "GSTREAMER: AHCSRC ACTIVE"
+                                else -> "GSTREAMER: IDLE (READY)"
+                            },
+                            color = if (isRtspRunning || isGstCameraActive) ColorSuccess else ColorCmd,
                             fontSize = 11.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold
@@ -456,16 +479,13 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
                 }
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Action Bar for GStreamer ahcsrc pipeline
+            // GStreamer ahcsrc & RTSP Controls Section
             if (cameraMode == CameraEngineMode.GSTREAMER_AHCSRC) {
                 // Device Index Selector (Back / Front / Auto)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(bottom = 4.dp),
+                        .horizontalScroll(rememberScrollState()),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
@@ -480,7 +500,7 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
                     FilterChip(
                         selected = gstAhcDevice == 0,
                         onClick = { gstAhcDevice = 0 },
-                        label = { Text("Back (0)", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
+                        label = { Text("Back (device=0)", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
                         colors = FilterChipDefaults.filterChipColors(
                             containerColor = ConsoleSurface,
                             labelColor = ColorText,
@@ -492,7 +512,7 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
                     FilterChip(
                         selected = gstAhcDevice == 1,
                         onClick = { gstAhcDevice = 1 },
-                        label = { Text("Front (1)", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
+                        label = { Text("Front (device=1)", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
                         colors = FilterChipDefaults.filterChipColors(
                             containerColor = ConsoleSurface,
                             labelColor = ColorText,
@@ -514,12 +534,11 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
                     )
                 }
 
-                // Rotation Selector (90° CW, 90° CCW, 180°, 0° Native)
+                // Rotation Selector (90° CW, 90° CCW, 0° Native)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(bottom = 6.dp),
+                        .horizontalScroll(rememberScrollState()),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
@@ -534,7 +553,7 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
                     FilterChip(
                         selected = gstRotationMethod == "clockwise",
                         onClick = { gstRotationMethod = "clockwise" },
-                        label = { Text("90° CW", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
+                        label = { Text("90° CW (Back Portrait)", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
                         colors = FilterChipDefaults.filterChipColors(
                             containerColor = ConsoleSurface,
                             labelColor = ColorText,
@@ -546,7 +565,7 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
                     FilterChip(
                         selected = gstRotationMethod == "counterclockwise",
                         onClick = { gstRotationMethod = "counterclockwise" },
-                        label = { Text("90° CCW", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
+                        label = { Text("90° CCW (Front Portrait)", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
                         colors = FilterChipDefaults.filterChipColors(
                             containerColor = ConsoleSurface,
                             labelColor = ColorText,
@@ -558,7 +577,7 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
                     FilterChip(
                         selected = gstRotationMethod == "none",
                         onClick = { gstRotationMethod = "none" },
-                        label = { Text("0° (Native)", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
+                        label = { Text("0° (Native Landscape)", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
                         colors = FilterChipDefaults.filterChipColors(
                             containerColor = ConsoleSurface,
                             labelColor = ColorText,
@@ -568,6 +587,7 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
                     )
                 }
 
+                // Local Preview Control Buttons (Start / Stop ahcsrc Preview)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -585,7 +605,7 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
 
                                 // 2. Stop any active GStreamer pipeline
                                 GStreamerBridge.stopPipeline()
-                                kotlinx.coroutines.delay(150) // Allow Android CameraManager HAL to finalize session close
+                                delay(150) // Allow Android CameraManager HAL to finalize session close
 
                                 // 3. Build zero-latency ahcsrc pipeline with leaky queue & videoflip rotation
                                 val devParam = if (gstAhcDevice >= 0) "device=$gstAhcDevice " else ""
@@ -596,28 +616,28 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
                                 isGstCameraActive = true
                             }
                         },
-                        enabled = !isGstCameraActive,
+                        enabled = !isGstCameraActive && !isRtspRunning,
                         modifier = Modifier
                             .weight(1f)
-                            .height(44.dp)
+                            .height(42.dp)
                             .testTag("start_gstreamer_camera_button"),
                         shape = RoundedCornerShape(6.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFF238636),
+                            containerColor = Color(0xFF1F6FEB),
                             contentColor = Color.White
                         )
                     ) {
                         Icon(
                             imageVector = Icons.Default.PlayArrow,
-                            contentDescription = "Start Camera Pipeline",
-                            modifier = Modifier.size(18.dp)
+                            contentDescription = "Start Camera Preview",
+                            modifier = Modifier.size(16.dp)
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = "Start ahcsrc Pipeline",
+                            text = "Start Local Preview",
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp
+                            fontSize = 11.sp
                         )
                     }
 
@@ -631,7 +651,7 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
                         enabled = isGstCameraActive,
                         modifier = Modifier
                             .weight(1f)
-                            .height(44.dp)
+                            .height(42.dp)
                             .testTag("stop_gstreamer_camera_button"),
                         shape = RoundedCornerShape(6.dp),
                         colors = ButtonDefaults.buttonColors(
@@ -641,22 +661,309 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
                     ) {
                         Icon(
                             imageVector = Icons.Default.Stop,
-                            contentDescription = "Stop Camera Pipeline",
-                            modifier = Modifier.size(18.dp)
+                            contentDescription = "Stop Camera Preview",
+                            modifier = Modifier.size(16.dp)
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = "Stop ahcsrc Pipeline",
+                            text = "Stop Local Preview",
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp
+                            fontSize = 11.sp
                         )
                     }
                 }
-                Spacer(modifier = Modifier.height(10.dp))
+
+                // Native GStreamer RTSP Server Configuration & Control Card
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = ConsoleSurface),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, ConsoleBorder)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.Router,
+                                    contentDescription = "RTSP Server",
+                                    tint = ColorCmd,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Native RTSP Broadcast Server",
+                                    color = Color.White,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp
+                                )
+                            }
+
+                            Surface(
+                                color = if (isRtspRunning) ColorSuccess.copy(alpha = 0.2f) else ConsoleBorder.copy(alpha = 0.5f),
+                                shape = RoundedCornerShape(4.dp),
+                                border = androidx.compose.foundation.BorderStroke(
+                                    1.dp,
+                                    if (isRtspRunning) ColorSuccess else ConsoleBorder
+                                )
+                            ) {
+                                Text(
+                                    text = if (isRtspRunning) "ONLINE" else "OFFLINE",
+                                    color = if (isRtspRunning) ColorSuccess else ColorText,
+                                    fontSize = 10.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+
+                        Text(
+                            text = "Streams live ahcsrc camera feed with hardware H.264 encoding (amcvideoenc_h264) directly to OBS Studio or VLC Media Player over Wi-Fi.",
+                            color = ColorText,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 11.sp
+                        )
+
+                        // Port & Path input fields
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = rtspPort,
+                                onValueChange = { rtspPort = it },
+                                label = { Text("RTSP Port", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
+                                singleLine = true,
+                                enabled = !isRtspRunning,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = ColorCmd,
+                                    unfocusedBorderColor = ConsoleBorder,
+                                    focusedLabelColor = ColorCmd,
+                                    unfocusedLabelColor = ColorText,
+                                    focusedTextColor = Color.White,
+                                    unfocusedTextColor = ColorText
+                                ),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("rtsp_port_input")
+                            )
+
+                            OutlinedTextField(
+                                value = rtspPath,
+                                onValueChange = { rtspPath = it },
+                                label = { Text("Stream Path", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
+                                singleLine = true,
+                                enabled = !isRtspRunning,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = ColorCmd,
+                                    unfocusedBorderColor = ConsoleBorder,
+                                    focusedLabelColor = ColorCmd,
+                                    unfocusedLabelColor = ColorText,
+                                    focusedTextColor = Color.White,
+                                    unfocusedTextColor = ColorText
+                                ),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("rtsp_path_input")
+                            )
+                        }
+
+                        // Start / Stop RTSP Server Action Buttons
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = {
+                                    scope.launch {
+                                        // 1. Unbind CameraX hardware session
+                                        try {
+                                            val cameraProvider = ProcessCameraProvider.getInstance(context).get()
+                                            cameraProvider.unbindAll()
+                                        } catch (e: Exception) {
+                                            Log.w("CameraViewfinder", "CameraX unbind failed: ${e.message}")
+                                        }
+
+                                        // 2. Stop local GStreamer preview pipeline if running
+                                        if (isGstCameraActive) {
+                                            GStreamerBridge.stopPipeline()
+                                            isGstCameraActive = false
+                                            delay(150)
+                                        }
+
+                                        // 3. Start native GStreamer RTSP Server
+                                        val err = GStreamerBridge.startRtspServer(
+                                            port = rtspPort.ifBlank { "8554" },
+                                            path = rtspPath.ifBlank { "/live" },
+                                            deviceIndex = gstAhcDevice,
+                                            rotationMethod = gstRotationMethod
+                                        )
+
+                                        if (err != null) {
+                                            Toast.makeText(context, "RTSP Server Error: $err", Toast.LENGTH_LONG).show()
+                                        }
+                                    }
+                                },
+                                enabled = !isRtspRunning,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(44.dp)
+                                    .testTag("start_rtsp_server_button"),
+                                shape = RoundedCornerShape(6.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFF238636),
+                                    contentColor = Color.White
+                                )
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.PlayArrow,
+                                    contentDescription = "Start RTSP Server",
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "Start RTSP Server",
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp
+                                )
+                            }
+
+                            Button(
+                                onClick = {
+                                    scope.launch {
+                                        GStreamerBridge.stopRtspServer()
+                                    }
+                                },
+                                enabled = isRtspRunning,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(44.dp)
+                                    .testTag("stop_rtsp_server_button"),
+                                shape = RoundedCornerShape(6.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFFDA3633),
+                                    contentColor = Color.White
+                                )
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Stop,
+                                    contentDescription = "Stop RTSP Server",
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "Stop RTSP Server",
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp
+                                )
+                            }
+                        }
+
+                        // RTSP URL Display & Copy Box
+                        if (isRtspRunning && rtspUrl.isNotEmpty()) {
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                color = Color.Black,
+                                shape = RoundedCornerShape(6.dp),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, ColorSuccess)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "LIVE RTSP STREAM URL:",
+                                            color = ColorSuccess,
+                                            fontSize = 9.sp,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = rtspUrl,
+                                            color = Color.White,
+                                            fontSize = 12.sp,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+
+                                    IconButton(
+                                        onClick = {
+                                            try {
+                                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                                val clip = ClipData.newPlainText("RTSP Stream URL", rtspUrl)
+                                                clipboard.setPrimaryClip(clip)
+                                                Toast.makeText(context, "Copied RTSP URL to clipboard!", Toast.LENGTH_SHORT).show()
+                                                GStreamerBridge.appendLog(LogLevel.SUCCESS, "CLIPBOARD", "Copied RTSP URL: $rtspUrl")
+                                            } catch (e: Exception) {
+                                                Log.e("CameraViewfinder", "Clipboard copy error", e)
+                                            }
+                                        },
+                                        modifier = Modifier.testTag("copy_rtsp_url_button")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.ContentCopy,
+                                            contentDescription = "Copy RTSP URL",
+                                            tint = ColorCmd,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Instructions Card for OBS / VLC
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = ConsoleSurface),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, ConsoleBorder)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = "How to Connect Clients:",
+                            color = ColorCmd,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.sp
+                        )
+                        Text(
+                            text = "• OBS Studio: Add 'Media Source' -> Uncheck 'Local File' -> Paste RTSP URL into Input field.",
+                            color = ColorText,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 10.sp
+                        )
+                        Text(
+                            text = "• VLC Player: Media -> Open Network Stream (Ctrl+N) -> Paste RTSP URL.",
+                            color = ColorText,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 10.sp
+                        )
+                    }
+                }
             }
 
-            // Info Card about RTSP Server Next Phase
+            // Mic info banner
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 color = ConsoleSurface,
@@ -666,20 +973,20 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(10.dp),
+                        .padding(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
                         imageVector = Icons.Default.Mic,
                         contentDescription = "Mic Ready",
                         tint = if (hasMicPermission) ColorSuccess else ColorCmd,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(16.dp)
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = if (hasMicPermission) "Audio source ready for RTSP server stream." else "Mic permission required for RTSP audio.",
+                        text = if (hasMicPermission) "Audio source ready for RTSP stream." else "Mic permission required for RTSP audio stream.",
                         color = ColorText,
-                        fontSize = 11.sp,
+                        fontSize = 10.sp,
                         fontFamily = FontFamily.Monospace
                     )
                 }

@@ -8,6 +8,7 @@
 #include <pthread.h>
 #include <gst/gst.h>
 #include <gst/video/videooverlay.h>
+#include <gst/rtsp-server/rtsp-server.h>
 
 #define TAG "GStreamerTutorial"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
@@ -17,6 +18,12 @@
 /* Dedicated mutexes to prevent any lock recursion or self-deadlocks */
 static pthread_mutex_t pipeline_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t window_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t rtsp_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+/* Native RTSP Server instance & state */
+static GstRTSPServer *rtsp_server = NULL;
+static guint rtsp_server_source_id = 0;
+static gboolean rtsp_server_running = FALSE;
 
 /* Native window and pipeline references */
 static ANativeWindow *current_native_window = NULL;
@@ -467,6 +474,137 @@ Java_com_example_gstreamer_GStreamerBridge_nativeGetPipelineState(JNIEnv *env, j
         default: return 0;
     }
 }
+
+/*
+ * Native RTSP Server implementation using GstRTSPServer
+ */
+JNIEXPORT jstring JNICALL
+Java_com_example_gstreamer_GStreamerBridge_nativeStartRtspServer(JNIEnv *env, jobject thiz,
+    jstring jport, jstring jpath, jint device_index, jstring jrotation) {
+
+    const char *port = (*env)->GetStringUTFChars(env, jport, NULL);
+    const char *path = (*env)->GetStringUTFChars(env, jpath, NULL);
+    const char *rotation = (*env)->GetStringUTFChars(env, jrotation, NULL);
+
+    ensure_worker_thread();
+
+    pthread_mutex_lock(&rtsp_mutex);
+
+    /* Stop previous RTSP server instance if active */
+    if (rtsp_server_running) {
+        LOGI("Stopping existing RTSP server...");
+        if (rtsp_server_source_id > 0) {
+            g_source_remove(rtsp_server_source_id);
+            rtsp_server_source_id = 0;
+        }
+        if (rtsp_server != NULL) {
+            g_object_unref(rtsp_server);
+            rtsp_server = NULL;
+        }
+        rtsp_server_running = FALSE;
+    }
+
+    char device_str[64] = "";
+    if (device_index >= 0) {
+        snprintf(device_str, sizeof(device_str), "device=%d", device_index);
+    }
+
+    char rotation_str[128] = "";
+    if (rotation != NULL && strlen(rotation) > 0 && strcmp(rotation, "none") != 0) {
+        snprintf(rotation_str, sizeof(rotation_str), "! videoflip method=%s ", rotation);
+    }
+
+    /* Build factory pipeline string:
+     * ( ahcsrc device=0 ! queue max-size-buffers=1 leaky=downstream ! videoflip method=clockwise ! videoconvert ! amcvideoenc_h264 ! rtph264pay name=pay0 pt=96 config-interval=1 )
+     */
+    char launch_str[1024];
+    snprintf(launch_str, sizeof(launch_str),
+        "( ahcsrc %s ! queue max-size-buffers=1 leaky=downstream %s! videoconvert ! amcvideoenc_h264 ! rtph264pay name=pay0 pt=96 config-interval=1 )",
+        device_str, rotation_str);
+
+    LOGI("Creating GstRTSPServer on port %s, path %s, pipeline: %s", port ? port : "8554", path ? path : "/live", launch_str);
+
+    rtsp_server = gst_rtsp_server_new();
+    if (rtsp_server == NULL) {
+        pthread_mutex_unlock(&rtsp_mutex);
+        if (port) (*env)->ReleaseStringUTFChars(env, jport, port);
+        if (path) (*env)->ReleaseStringUTFChars(env, jpath, path);
+        if (rotation) (*env)->ReleaseStringUTFChars(env, jrotation, rotation);
+        return (*env)->NewStringUTF(env, "Failed to create GstRTSPServer instance");
+    }
+
+    if (port != NULL && strlen(port) > 0) {
+        gst_rtsp_server_set_service(rtsp_server, port);
+    }
+
+    GstRTSPMountPoints *mounts = gst_rtsp_server_get_mount_points(rtsp_server);
+    GstRTSPMediaFactory *factory = gst_rtsp_media_factory_new();
+
+    gst_rtsp_media_factory_set_launch(factory, launch_str);
+    gst_rtsp_media_factory_set_shared(factory, TRUE);
+
+    const char *mount_path = (path != NULL && strlen(path) > 0) ? path : "/live";
+    gst_rtsp_mount_points_add_factory(mounts, mount_path, factory);
+    g_object_unref(mounts);
+
+    rtsp_server_source_id = gst_rtsp_server_attach(rtsp_server, gst_main_context);
+    if (rtsp_server_source_id == 0) {
+        LOGE("Failed to attach GstRTSPServer to port %s", port ? port : "8554");
+        g_object_unref(rtsp_server);
+        rtsp_server = NULL;
+        rtsp_server_running = FALSE;
+        pthread_mutex_unlock(&rtsp_mutex);
+
+        if (port) (*env)->ReleaseStringUTFChars(env, jport, port);
+        if (path) (*env)->ReleaseStringUTFChars(env, jpath, path);
+        if (rotation) (*env)->ReleaseStringUTFChars(env, jrotation, rotation);
+        return (*env)->NewStringUTF(env, "Failed to attach GstRTSPServer to socket port");
+    }
+
+    rtsp_server_running = TRUE;
+    pthread_mutex_unlock(&rtsp_mutex);
+
+    LOGI("GstRTSPServer attached successfully on port %s mount %s", port ? port : "8554", mount_path);
+    gchar *log_msg = g_strdup_printf("RTSP Server listening on port %s (mount point %s)", port ? port : "8554", mount_path);
+    notify_java_message(log_msg, FALSE);
+    g_free(log_msg);
+
+    if (port) (*env)->ReleaseStringUTFChars(env, jport, port);
+    if (path) (*env)->ReleaseStringUTFChars(env, jpath, path);
+    if (rotation) (*env)->ReleaseStringUTFChars(env, jrotation, rotation);
+
+    return NULL; /* Success */
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_gstreamer_GStreamerBridge_nativeStopRtspServer(JNIEnv *env, jobject thiz) {
+    pthread_mutex_lock(&rtsp_mutex);
+    if (rtsp_server_running) {
+        LOGI("Stopping GstRTSPServer...");
+        if (rtsp_server_source_id > 0) {
+            g_source_remove(rtsp_server_source_id);
+            rtsp_server_source_id = 0;
+        }
+        if (rtsp_server != NULL) {
+            g_object_unref(rtsp_server);
+            rtsp_server = NULL;
+        }
+        rtsp_server_running = FALSE;
+        LOGI("GstRTSPServer stopped");
+        notify_java_message("RTSP Server stopped", FALSE);
+    }
+    pthread_mutex_unlock(&rtsp_mutex);
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_example_gstreamer_GStreamerBridge_nativeIsRtspServerRunning(JNIEnv *env, jobject thiz) {
+    pthread_mutex_lock(&rtsp_mutex);
+    jboolean running = rtsp_server_running ? JNI_TRUE : JNI_FALSE;
+    pthread_mutex_unlock(&rtsp_mutex);
+    return running;
+}
+
+
 
 /*
  * JNI Lifecycle hooks

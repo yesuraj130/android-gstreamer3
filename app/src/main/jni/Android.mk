@@ -58,7 +58,7 @@ GSTREAMER_PLUGINS := \
     videofilter \
     libav
 
-GSTREAMER_EXTRA_DEPS := gstreamer-video-1.0
+GSTREAMER_EXTRA_DEPS := gstreamer-video-1.0 gstreamer-rtsp-server-1.0
 GSTREAMER_COPY_CACERTIFICATES := no
 GSTREAMER_COPY_FONTS := no
 

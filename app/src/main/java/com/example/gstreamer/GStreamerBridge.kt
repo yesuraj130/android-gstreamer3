@@ -50,6 +50,9 @@ object GStreamerBridge {
     private external fun nativeStopPipeline()
     private external fun nativeGetPipelineState(): Int
     private external fun nativeSetDebugLevel(level: Int)
+    private external fun nativeStartRtspServer(port: String, path: String, deviceIndex: Int, rotationMethod: String): String?
+    private external fun nativeStopRtspServer()
+    private external fun nativeIsRtspServerRunning(): Boolean
 
     private var nativeLibrariesLoaded = false
     private var nativeLoadError: String? = null
@@ -63,6 +66,13 @@ object GStreamerBridge {
 
     private val _isPlaying = MutableStateFlow(false)
     val isPlaying: StateFlow<Boolean> = _isPlaying.asStateFlow()
+
+    private val _isRtspServerRunning = MutableStateFlow(false)
+    val isRtspServerRunning: StateFlow<Boolean> = _isRtspServerRunning.asStateFlow()
+
+    private val _rtspServerUrl = MutableStateFlow("")
+    val rtspServerUrl: StateFlow<String> = _rtspServerUrl.asStateFlow()
+
 
     private val _activePipelineString = MutableStateFlow("videotestsrc ! videoconvert ! autovideosink")
     val activePipelineString: StateFlow<String> = _activePipelineString.asStateFlow()
@@ -276,6 +286,91 @@ object GStreamerBridge {
             appendLog(LogLevel.ERROR, "PIPELINE", "Exception stopping pipeline: ${t.message}")
         }
     }
+
+    fun getWifiIpAddress(): String {
+        try {
+            val interfaces = java.net.NetworkInterface.getNetworkInterfaces()
+            for (intf in interfaces) {
+                val addrs = intf.inetAddresses
+                for (addr in addrs) {
+                    if (!addr.isLoopbackAddress && addr is java.net.Inet4Address) {
+                        val ip = addr.hostAddress ?: ""
+                        if (ip.isNotEmpty()) return ip
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error resolving device IP address", e)
+        }
+        return "127.0.0.1"
+    }
+
+    suspend fun startRtspServer(
+        port: String = "8554",
+        path: String = "/live",
+        deviceIndex: Int = 0,
+        rotationMethod: String = "clockwise"
+    ): String? = withContext(Dispatchers.IO) {
+        appendLog(LogLevel.CMD, "RTSP", "Starting GStreamer RTSP Server on port $port, mount path $path...")
+
+        if (!nativeLibrariesLoaded) {
+            val loaded = tryLoadNativeLibraries()
+            if (!loaded) {
+                appendLog(LogLevel.ERROR, "RTSP", "Native libraries not loaded.")
+                return@withContext "Native libraries not loaded"
+            }
+        }
+
+        appContext?.let { ctx ->
+            try {
+                org.freedesktop.gstreamer.GStreamer.init(ctx)
+            } catch (e: Exception) {
+                appendLog(LogLevel.WARN, "INIT", "GStreamer.init: ${e.message}")
+            }
+        }
+
+        try {
+            val cleanPath = if (path.startsWith("/")) path else "/$path"
+            val errorMsg = nativeStartRtspServer(port, cleanPath, deviceIndex, rotationMethod)
+            if (errorMsg == null) {
+                _isRtspServerRunning.value = true
+                val ip = getWifiIpAddress()
+                val fullUrl = "rtsp://$ip:$port$cleanPath"
+                _rtspServerUrl.value = fullUrl
+                appendLog(LogLevel.SUCCESS, "RTSP", "RTSP Server Active! Connect streaming client to: $fullUrl")
+            } else {
+                _isRtspServerRunning.value = false
+                _rtspServerUrl.value = ""
+                appendLog(LogLevel.ERROR, "RTSP", "Native RTSP Server start failed: $errorMsg")
+            }
+            return@withContext errorMsg
+        } catch (t: Throwable) {
+            _isRtspServerRunning.value = false
+            _rtspServerUrl.value = ""
+            appendLog(LogLevel.ERROR, "RTSP", "Exception starting RTSP Server: ${t.message}")
+            return@withContext t.message ?: "RTSP Start Exception"
+        }
+    }
+
+    suspend fun stopRtspServer() = withContext(Dispatchers.IO) {
+        appendLog(LogLevel.CMD, "RTSP", "Stopping RTSP Server...")
+        if (!nativeLibrariesLoaded) {
+            _isRtspServerRunning.value = false
+            _rtspServerUrl.value = ""
+            return@withContext
+        }
+
+        try {
+            nativeStopRtspServer()
+            _isRtspServerRunning.value = false
+            _rtspServerUrl.value = ""
+            appendLog(LogLevel.INFO, "RTSP", "RTSP Server stopped")
+        } catch (t: Throwable) {
+            _isRtspServerRunning.value = false
+            appendLog(LogLevel.ERROR, "RTSP", "Exception stopping RTSP Server: ${t.message}")
+        }
+    }
+
 
     private fun tryLoadNativeLibraries(): Boolean {
         if (nativeLibrariesLoaded) return true
