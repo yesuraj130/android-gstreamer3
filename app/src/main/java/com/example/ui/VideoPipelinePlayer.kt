@@ -72,6 +72,7 @@ data class PipelinePreset(
 val DEFAULT_PRESETS = listOf(
     PipelinePreset("Color Bars", "videotestsrc ! videoconvert ! autovideosink"),
     PipelinePreset("Bouncing Ball", "videotestsrc pattern=ball ! videoconvert ! autovideosink"),
+    PipelinePreset("Camera (ahcsrc)", "ahcsrc device=0 ! videoconvert ! glimagesink sync=false"),
     PipelinePreset("Low-Latency RTSP", "rtspsrc location=rtsp://192.168.0.107:8554/live latency=0 buffer-mode=none drop-on-latency=true ! decodebin3 ! glimagesink sync=false"),
     PipelinePreset("RTSP (rtspsrc + TCP)", "rtspsrc location=rtsp://rtspstream.com/pattern protocols=tcp latency=100 ! rtph264depay ! h264parse ! decodebin ! videoconvert ! autovideosink"),
     PipelinePreset("RTSP (uridecodebin + TCP)", "uridecodebin uri=rtsp://rtspstream.com/pattern source::protocols=tcp ! videoconvert ! autovideosink"),

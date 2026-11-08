@@ -452,11 +452,11 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
                     Button(
                         onClick = {
                             scope.launch {
-                                // Launch GStreamer camera capture pipeline
-                                val err = GStreamerBridge.startPipeline("ahcsrc device=0 ! videoconvert ! autovideosink")
-                                if (err == null) {
-                                    isGstCameraActive = true
-                                }
+                                // Ensure any running pipeline is stopped before launching ahcsrc
+                                GStreamerBridge.stopPipeline()
+                                val pipelineStr = "ahcsrc device=0 ! videoconvert ! glimagesink sync=false"
+                                GStreamerBridge.startPipeline(pipelineStr)
+                                isGstCameraActive = true
                             }
                         },
                         enabled = !isGstCameraActive,
