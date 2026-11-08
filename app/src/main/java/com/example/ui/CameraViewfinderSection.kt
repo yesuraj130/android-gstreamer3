@@ -109,6 +109,21 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
     var cameraMode by remember { mutableStateOf(CameraEngineMode.CAMERAX_VIEWFINDER) }
     var lensFacing by remember { mutableStateOf(CameraSelector.LENS_FACING_BACK) }
     var isGstCameraActive by remember { mutableStateOf(false) }
+    var gstAhcDevice by remember { mutableStateOf(0) } // 0 = Back, 1 = Front, -1 = Auto
+
+    // Unbind CameraX whenever switching to GStreamer ahcsrc mode to release camera hardware lock
+    LaunchedEffect(cameraMode) {
+        if (cameraMode == CameraEngineMode.GSTREAMER_AHCSRC) {
+            try {
+                val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
+                val cameraProvider = cameraProviderFuture.get()
+                cameraProvider.unbindAll()
+                Log.i("CameraViewfinder", "CameraX provider unbound to grant exclusive access to GStreamer ahcsrc")
+            } catch (e: Exception) {
+                Log.w("CameraViewfinder", "Failed to unbind CameraX provider: ${e.message}")
+            }
+        }
+    }
 
     Column(
         modifier = modifier
@@ -445,6 +460,59 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
 
             // Action Bar for GStreamer ahcsrc pipeline
             if (cameraMode == CameraEngineMode.GSTREAMER_AHCSRC) {
+                // Device Index Selector (Back / Front / Auto)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = "Camera:",
+                        color = ColorCmd,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+
+                    FilterChip(
+                        selected = gstAhcDevice == 0,
+                        onClick = { gstAhcDevice = 0 },
+                        label = { Text("Back (device=0)", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            containerColor = ConsoleSurface,
+                            labelColor = ColorText,
+                            selectedContainerColor = Color(0xFF1F6FEB),
+                            selectedLabelColor = Color.White
+                        )
+                    )
+
+                    FilterChip(
+                        selected = gstAhcDevice == 1,
+                        onClick = { gstAhcDevice = 1 },
+                        label = { Text("Front (device=1)", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            containerColor = ConsoleSurface,
+                            labelColor = ColorText,
+                            selectedContainerColor = Color(0xFF1F6FEB),
+                            selectedLabelColor = Color.White
+                        )
+                    )
+
+                    FilterChip(
+                        selected = gstAhcDevice == -1,
+                        onClick = { gstAhcDevice = -1 },
+                        label = { Text("Auto", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            containerColor = ConsoleSurface,
+                            labelColor = ColorText,
+                            selectedContainerColor = Color(0xFF1F6FEB),
+                            selectedLabelColor = Color.White
+                        )
+                    )
+                }
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -452,9 +520,22 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
                     Button(
                         onClick = {
                             scope.launch {
-                                // Ensure any running pipeline is stopped before launching ahcsrc
+                                // 1. Unbind CameraX completely to release Android Camera2 hardware lock
+                                try {
+                                    val cameraProvider = ProcessCameraProvider.getInstance(context).get()
+                                    cameraProvider.unbindAll()
+                                } catch (e: Exception) {
+                                    Log.w("CameraViewfinder", "CameraX unbind failed: ${e.message}")
+                                }
+
+                                // 2. Stop any active GStreamer pipeline
                                 GStreamerBridge.stopPipeline()
-                                val pipelineStr = "ahcsrc device=0 ! videoconvert ! glimagesink sync=false"
+                                kotlinx.coroutines.delay(150) // Allow Android CameraManager HAL to finalize session close
+
+                                // 3. Build ahcsrc pipeline
+                                val devParam = if (gstAhcDevice >= 0) "device=$gstAhcDevice " else ""
+                                val pipelineStr = "ahcsrc ${devParam}! videoconvert ! glimagesink sync=false"
+
                                 GStreamerBridge.startPipeline(pipelineStr)
                                 isGstCameraActive = true
                             }
