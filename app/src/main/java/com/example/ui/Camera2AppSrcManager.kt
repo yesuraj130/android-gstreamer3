@@ -31,7 +31,20 @@ class Camera2AppSrcManager(private val context: Context) {
 
         val manager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
         try {
-            val pipelineDesc = "appsrc name=mysource format=time is-live=true do-timestamp=true block=true ! video/x-raw,format=I420,width=$width,height=$height,framerate=30/1 ! videoconvert ! x264enc tune=zerolatency speed-preset=ultrafast bitrate=2048 key-int-max=15 ! rtph264pay name=pay0 pt=96 config-interval=1 mtu=1400"
+            // Determine best encoder (Hardware MediaCodec vs Software x264)
+            val encodersStr = GStreamerBridge.availableEncoders.value
+            val hwEncName = encodersStr.split(",").map { it.trim() }.firstOrNull { it.startsWith("amcvidenc") || it.startsWith("amcvideoenc") }
+
+            val encFragment = if (hwEncName != null) {
+                GStreamerBridge.appendLog(LogLevel.SUCCESS, "APPSRC", "Using Hardware MediaCodec Encoder: $hwEncName")
+                "videoconvert ! video/x-raw,format=NV12 ! $hwEncName i-frame-interval=1 bitrate=2500000"
+            } else {
+                GStreamerBridge.appendLog(LogLevel.INFO, "APPSRC", "Hardware encoder not found, using Software x264enc")
+                "videoconvert ! video/x-raw,format=I420 ! x264enc tune=zerolatency speed-preset=ultrafast bitrate=2048 key-int-max=15 bframes=0 rc-lookahead=0 sliced-threads=true"
+            }
+
+            // block=false -> Drop frames instead of waiting for backpressure
+            val pipelineDesc = "appsrc name=mysource format=time is-live=true do-timestamp=true block=false ! video/x-raw,width=$width,height=$height,framerate=30/1 ! $encFragment ! h264parse ! rtph264pay name=pay0 pt=96 config-interval=1 mtu=1400"
             GStreamerBridge.appendLog(LogLevel.CMD, "APPSRC", "Starting Camera2 appsrc pipeline: $pipelineDesc")
             
             GlobalScope.launch(Dispatchers.IO) {
@@ -43,9 +56,13 @@ class Camera2AppSrcManager(private val context: Context) {
                 val image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
                 try {
                     if (isRunning) {
-                        val i420Bytes = convertYuv420888ToI420(image)
-                        if (i420Bytes != null) {
-                            GStreamerBridge.pushAppSrcBuffer(i420Bytes)
+                        val frameBytes = if (hwEncName != null) {
+                            convertYuv420888ToNV12(image)
+                        } else {
+                            convertYuv420888ToI420(image)
+                        }
+                        if (frameBytes != null) {
+                            GStreamerBridge.pushAppSrcBuffer(frameBytes)
                         }
                     }
                 } catch (e: Exception) {
@@ -98,7 +115,7 @@ class Camera2AppSrcManager(private val context: Context) {
                         captureSession = session
                         try {
                             session.setRepeatingRequest(requestBuilder.build(), null, handler)
-                            GStreamerBridge.appendLog(LogLevel.SUCCESS, "APPSRC", "Camera2 capture session active on lens")
+                            GStreamerBridge.appendLog(LogLevel.SUCCESS, "APPSRC", "Camera2 capture session active")
                         } catch (e: Exception) {
                             GStreamerBridge.appendLog(LogLevel.ERROR, "APPSRC", "Failed to start repeating request: ${e.message}")
                         }
@@ -175,6 +192,58 @@ class Camera2AppSrcManager(private val context: Context) {
         }
 
         return i420
+    }
+
+    private fun convertYuv420888ToNV12(image: Image): ByteArray? {
+        val width = image.width
+        val height = image.height
+        val ySize = width * height
+        val uvSize = ySize / 2
+        val nv12 = ByteArray(ySize + uvSize)
+
+        val planes = image.planes
+        val yPlane = planes[0]
+        val uPlane = planes[1]
+        val vPlane = planes[2]
+
+        val yBuffer = yPlane.buffer
+        val uBuffer = uPlane.buffer
+        val vBuffer = vPlane.buffer
+
+        // Copy Y
+        if (yPlane.pixelStride == 1) {
+            yBuffer.get(nv12, 0, ySize)
+        } else {
+            var pos = 0
+            for (r in 0 until height) {
+                yBuffer.position(r * yPlane.rowStride)
+                for (c in 0 until width) {
+                    nv12[pos++] = yBuffer.get()
+                }
+            }
+        }
+
+        // Interleave UV into NV12 (U, V, U, V...)
+        val chromaWidth = width / 2
+        val chromaHeight = height / 2
+        val uRowStride = uPlane.rowStride
+        val vRowStride = vPlane.rowStride
+        val uPixelStride = uPlane.pixelStride
+        val vPixelStride = vPlane.pixelStride
+
+        var uvPos = ySize
+        for (r in 0 until chromaHeight) {
+            uBuffer.position(r * uRowStride)
+            vBuffer.position(r * vRowStride)
+            for (c in 0 until chromaWidth) {
+                nv12[uvPos++] = uBuffer.get()
+                nv12[uvPos++] = vBuffer.get()
+                if (uPixelStride > 1) for (i in 0 until uPixelStride - 1) uBuffer.get()
+                if (vPixelStride > 1) for (i in 0 until vPixelStride - 1) vBuffer.get()
+            }
+        }
+
+        return nv12
     }
 
     fun stop() {
