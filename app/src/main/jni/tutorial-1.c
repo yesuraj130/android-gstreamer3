@@ -475,6 +475,14 @@ Java_com_example_gstreamer_GStreamerBridge_nativeGetPipelineState(JNIEnv *env, j
     }
 }
 
+static void media_configure_cb(GstRTSPMediaFactory *factory, GstRTSPMedia *media, gpointer user_data) {
+    LOGI("RTSP MediaFactory media-configure: attaching RTSP worker thread to JavaVM...");
+    JNIEnv *env = get_jni_env();
+    if (env == NULL) {
+        LOGE("media_configure_cb: Failed to attach thread to JavaVM!");
+    }
+}
+
 /*
  * Native RTSP Server implementation using GstRTSPServer
  */
@@ -515,11 +523,11 @@ Java_com_example_gstreamer_GStreamerBridge_nativeStartRtspServer(JNIEnv *env, jo
     }
 
     /* Build factory pipeline string:
-     * ( ahcsrc device=0 ! queue max-size-buffers=1 leaky=downstream ! videoflip method=clockwise ! videoconvert ! amcvideoenc_h264 ! h264parse ! rtph264pay name=pay0 pt=96 config-interval=1 )
+     * ( ahcsrc device=0 ! queue max-size-buffers=1 leaky=downstream ! videoflip method=clockwise ! videoconvert ! video/x-raw,format=NV12 ! amcvideoenc_h264 ! h264parse ! rtph264pay name=pay0 pt=96 config-interval=1 )
      */
     char launch_str[1024];
     snprintf(launch_str, sizeof(launch_str),
-        "( ahcsrc %s ! queue max-size-buffers=1 leaky=downstream %s! videoconvert ! amcvideoenc_h264 ! h264parse ! rtph264pay name=pay0 pt=96 config-interval=1 )",
+        "( ahcsrc %s ! queue max-size-buffers=1 leaky=downstream %s! videoconvert ! video/x-raw,format=NV12 ! amcvideoenc_h264 ! h264parse ! rtph264pay name=pay0 pt=96 config-interval=1 )",
         device_str, rotation_str);
 
     LOGI("Creating GstRTSPServer on port %s, path %s, pipeline: %s", port ? port : "8554", path ? path : "/live", launch_str);
@@ -546,6 +554,8 @@ Java_com_example_gstreamer_GStreamerBridge_nativeStartRtspServer(JNIEnv *env, jo
     gst_rtsp_media_factory_set_launch(factory, launch_str);
     gst_rtsp_media_factory_set_shared(factory, TRUE);
     gst_rtsp_media_factory_set_protocols(factory, GST_RTSP_LOWER_TRANS_TCP | GST_RTSP_LOWER_TRANS_UDP);
+
+    g_signal_connect(factory, "media-configure", G_CALLBACK(media_configure_cb), NULL);
 
     const char *mount_path = (path != NULL && strlen(path) > 0) ? path : "/live";
     gst_rtsp_mount_points_add_factory(mounts, mount_path, factory);
