@@ -58,6 +58,8 @@ GSTREAMER_PLUGINS := \
     libav
 
 GSTREAMER_EXTRA_DEPS := gstreamer-video-1.0
+GSTREAMER_COPY_CACERTIFICATES := no
+GSTREAMER_COPY_FONTS := no
 
 # GStreamer makefile MUST be included at the end of Android.mk
 include $(GSTREAMER_NDK_BUILD_PATH)/gstreamer-1.0.mk
