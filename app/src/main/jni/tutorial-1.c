@@ -475,11 +475,69 @@ Java_com_example_gstreamer_GStreamerBridge_nativeGetPipelineState(JNIEnv *env, j
     }
 }
 
+static char *get_h264_encoder_pipeline_fragment(void) {
+    /* 1. Check if any hardware amcvidenc exists in the GStreamer registry */
+    GList *list = gst_element_factory_list_get_elements(
+        GST_ELEMENT_FACTORY_TYPE_ENCODER | GST_ELEMENT_FACTORY_TYPE_MEDIA_VIDEO,
+        GST_RANK_MARGINAL);
+    GstCaps *h264_caps = gst_caps_from_string("video/x-h264");
+    char *hw_encoder = NULL;
+
+    for (GList *l = list; l != NULL; l = l->next) {
+        GstElementFactory *factory = GST_ELEMENT_FACTORY(l->data);
+        const gchar *name = gst_plugin_feature_get_name(GST_PLUGIN_FEATURE(factory));
+        LOGI("Video encoder in registry: %s", name);
+        if (h264_caps != NULL && gst_element_factory_can_src_any_caps(factory, h264_caps)) {
+            LOGI("Found H264 encoder: %s", name);
+            if (g_str_has_prefix(name, "amcvidenc") || g_str_has_prefix(name, "amcvideoenc")) {
+                if (hw_encoder == NULL) {
+                    hw_encoder = g_strdup(name);
+                }
+            }
+        }
+    }
+    if (h264_caps) gst_caps_unref(h264_caps);
+    gst_plugin_feature_list_free(list);
+
+    if (hw_encoder != NULL) {
+        LOGI("Using Hardware MediaCodec H264 Encoder: %s", hw_encoder);
+        char *fragment = g_strdup_printf("videoconvert ! video/x-raw,format=NV12 ! %s", hw_encoder);
+        g_free(hw_encoder);
+        return fragment;
+    }
+
+    /* 2. Fall back to software x264enc (ultrafast, zerolatency) */
+    if (gst_element_factory_find("x264enc") != NULL) {
+        LOGI("Using universal software x264enc (ultrafast zerolatency)");
+        return g_strdup("videoconvert ! x264enc tune=zerolatency speed-preset=ultrafast bitrate=2000 key-int-max=30");
+    }
+
+    /* 3. Fall back to openh264enc */
+    if (gst_element_factory_find("openh264enc") != NULL) {
+        LOGI("Using openh264enc");
+        return g_strdup("videoconvert ! openh264enc");
+    }
+
+    /* 4. Default fallback */
+    LOGW("Defaulting to x264enc");
+    return g_strdup("videoconvert ! x264enc tune=zerolatency speed-preset=ultrafast bitrate=2000 key-int-max=30");
+}
+
 static void media_configure_cb(GstRTSPMediaFactory *factory, GstRTSPMedia *media, gpointer user_data) {
     LOGI("RTSP MediaFactory media-configure: attaching RTSP worker thread to JavaVM...");
-    JNIEnv *env = get_jni_env();
-    if (env == NULL) {
-        LOGE("media_configure_cb: Failed to attach thread to JavaVM!");
+    get_jni_env();
+
+    GstElement *pipeline = gst_rtsp_media_get_element(media);
+    if (pipeline != NULL) {
+        GstBus *bus = gst_pipeline_get_bus(GST_PIPELINE(pipeline));
+        if (bus != NULL) {
+            gst_bus_add_signal_watch(bus);
+            g_signal_connect(G_OBJECT(bus), "message::error", (GCallback)error_cb, NULL);
+            g_signal_connect(G_OBJECT(bus), "message::warning", (GCallback)warning_cb, NULL);
+            g_signal_connect(G_OBJECT(bus), "message::info", (GCallback)info_cb, NULL);
+            gst_object_unref(bus);
+        }
+        gst_object_unref(pipeline);
     }
 }
 
@@ -522,13 +580,17 @@ Java_com_example_gstreamer_GStreamerBridge_nativeStartRtspServer(JNIEnv *env, jo
         snprintf(rotation_str, sizeof(rotation_str), "! videoflip method=%s ", rotation);
     }
 
+    char *enc_fragment = get_h264_encoder_pipeline_fragment();
+
     /* Build factory pipeline string:
-     * ( ahcsrc device=0 ! queue max-size-buffers=1 leaky=downstream ! videoflip method=clockwise ! videoconvert ! video/x-raw,format=NV12 ! amcvideoenc_h264 ! h264parse ! rtph264pay name=pay0 pt=96 config-interval=1 )
+     * ( ahcsrc device=0 ! queue max-size-buffers=1 leaky=downstream ! videoflip method=clockwise ! <enc_fragment> ! h264parse ! rtph264pay name=pay0 pt=96 config-interval=1 )
      */
     char launch_str[1024];
     snprintf(launch_str, sizeof(launch_str),
-        "( ahcsrc %s ! queue max-size-buffers=1 leaky=downstream %s! videoconvert ! video/x-raw,format=NV12 ! amcvideoenc_h264 ! h264parse ! rtph264pay name=pay0 pt=96 config-interval=1 )",
-        device_str, rotation_str);
+        "( ahcsrc %s ! queue max-size-buffers=1 leaky=downstream %s! %s ! h264parse ! rtph264pay name=pay0 pt=96 config-interval=1 )",
+        device_str, rotation_str, enc_fragment ? enc_fragment : "videoconvert ! x264enc tune=zerolatency speed-preset=ultrafast");
+
+    if (enc_fragment) g_free(enc_fragment);
 
     LOGI("Creating GstRTSPServer on port %s, path %s, pipeline: %s", port ? port : "8554", path ? path : "/live", launch_str);
 
@@ -556,6 +618,7 @@ Java_com_example_gstreamer_GStreamerBridge_nativeStartRtspServer(JNIEnv *env, jo
     gst_rtsp_media_factory_set_protocols(factory, GST_RTSP_LOWER_TRANS_TCP | GST_RTSP_LOWER_TRANS_UDP);
 
     g_signal_connect(factory, "media-configure", G_CALLBACK(media_configure_cb), NULL);
+
 
     const char *mount_path = (path != NULL && strlen(path) > 0) ? path : "/live";
     gst_rtsp_mount_points_add_factory(mounts, mount_path, factory);

@@ -56,6 +56,8 @@ GSTREAMER_PLUGINS := \
     soup \
     androidmedia \
     videofilter \
+    x264 \
+    openh264 \
     libav
 
 GSTREAMER_EXTRA_DEPS := gstreamer-video-1.0 gstreamer-rtsp-server-1.0

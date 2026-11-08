@@ -74,6 +74,7 @@ val DEFAULT_PRESETS = listOf(
     PipelinePreset("Color Bars", "videotestsrc ! videoconvert ! autovideosink"),
     PipelinePreset("Bouncing Ball", "videotestsrc pattern=ball ! videoconvert ! autovideosink"),
     PipelinePreset("Camera (ahcsrc)", "ahcsrc device=0 ! queue max-size-buffers=1 leaky=downstream ! videoflip method=clockwise ! videoconvert ! glimagesink sync=false"),
+    PipelinePreset("RTSP Loopback (playbin)", "playbin uri=rtsp://127.0.0.1:8554/live"),
     PipelinePreset("RTSP Local Loopback (127.0.0.1)", "rtspsrc location=rtsp://127.0.0.1:8554/live protocols=tcp latency=100 ! rtph264depay ! h264parse ! decodebin ! glimagesink sync=false"),
     PipelinePreset("RTSP Local Network (TCP)", "rtspsrc location=rtsp://192.168.1.105:8554/live protocols=tcp latency=100 ! rtph264depay ! h264parse ! decodebin ! glimagesink sync=false"),
     PipelinePreset("RTSP (rtspsrc + TCP)", "rtspsrc location=rtsp://rtspstream.com/pattern protocols=tcp latency=100 ! rtph264depay ! h264parse ! decodebin ! videoconvert ! autovideosink"),
