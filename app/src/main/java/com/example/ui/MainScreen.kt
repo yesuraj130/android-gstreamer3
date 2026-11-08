@@ -34,7 +34,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.zIndex
 
 private val ConsoleBackground = Color(0xFF0D1117)
 private val ConsoleSurface = Color(0xFF161B22)
@@ -45,7 +46,6 @@ private val ColorText = Color(0xFFC9D1D9)
 @Composable
 fun MainScreen(modifier: Modifier = Modifier) {
     var selectedTabIndex by remember { mutableIntStateOf(0) }
-    val saveableStateHolder = rememberSaveableStateHolder()
 
     Column(
         modifier = modifier
@@ -170,18 +170,37 @@ fun MainScreen(modifier: Modifier = Modifier) {
             )
         }
 
-        // Active Tab Screen Content with state preservation
+        // All 3 Tabs kept continuously active in memory to avoid unmounting or losing state
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .weight(1f)
         ) {
-            saveableStateHolder.SaveableStateProvider(key = selectedTabIndex) {
-                when (selectedTabIndex) {
-                    0 -> VideoPipelineSection()
-                    1 -> CameraViewfinderSection()
-                    2 -> TerminalLogViewer()
-                }
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .alpha(if (selectedTabIndex == 0) 1f else 0f)
+                    .zIndex(if (selectedTabIndex == 0) 1f else 0f)
+            ) {
+                VideoPipelineSection()
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .alpha(if (selectedTabIndex == 1) 1f else 0f)
+                    .zIndex(if (selectedTabIndex == 1) 1f else 0f)
+            ) {
+                CameraViewfinderSection()
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .alpha(if (selectedTabIndex == 2) 1f else 0f)
+                    .zIndex(if (selectedTabIndex == 2) 1f else 0f)
+            ) {
+                TerminalLogViewer()
             }
         }
     }

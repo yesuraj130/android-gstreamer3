@@ -167,10 +167,20 @@ fun TerminalLogViewer(modifier: Modifier = Modifier) {
                     GStreamerBridge.clearLogs()
                 },
                 onCopy = {
-                    val fullText = logs.joinToString("\n") { "[${it.time}] [${it.tag}] ${it.message}" }
-                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                    clipboard.setPrimaryClip(ClipData.newPlainText("GStreamer Logs", fullText))
-                    Toast.makeText(context, "Terminal logs copied to clipboard", Toast.LENGTH_SHORT).show()
+                    try {
+                        val safeLogs = logs.takeLast(300)
+                        val fullText = safeLogs.joinToString("\n") { log ->
+                            val msg = if (log.message.length > 500) log.message.take(500) + "..." else log.message
+                            "[${log.time}] [${log.tag}] $msg"
+                        }
+                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        val clip = ClipData.newPlainText("GStreamer Logs", fullText.ifEmpty { "No logs recorded" })
+                        clipboard.setPrimaryClip(clip)
+                        Toast.makeText(context, "Copied ${safeLogs.size} log entries to clipboard", Toast.LENGTH_SHORT).show()
+                    } catch (t: Throwable) {
+                        android.util.Log.e("TerminalLogViewer", "Failed to copy logs to clipboard", t)
+                        Toast.makeText(context, "Could not copy logs: ${t.message}", Toast.LENGTH_SHORT).show()
+                    }
                 }
             )
         }
