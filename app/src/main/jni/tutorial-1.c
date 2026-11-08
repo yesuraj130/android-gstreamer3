@@ -9,6 +9,7 @@
 #include <gst/gst.h>
 #include <gst/video/videooverlay.h>
 #include <gst/rtsp-server/rtsp-server.h>
+#include <gst/app/gstappsrc.h>
 
 #define TAG "GStreamerTutorial"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
@@ -341,12 +342,15 @@ Java_com_example_gstreamer_GStreamerBridge_nativeClearSurface(JNIEnv *env, jobje
     pthread_mutex_unlock(&window_mutex);
 }
 
+static GstElement *active_app_src = NULL;
+
 /*
  * Tutorial 2 & 3: Stop active pipeline
  */
 JNIEXPORT void JNICALL
 Java_com_example_gstreamer_GStreamerBridge_nativeStopPipeline(JNIEnv *env, jobject thiz) {
     pthread_mutex_lock(&pipeline_mutex);
+    active_app_src = NULL;
     if (current_pipeline != NULL) {
         LOGI("Stopping pipeline to GST_STATE_NULL...");
         gst_element_set_state(current_pipeline, GST_STATE_NULL);
@@ -430,12 +434,22 @@ Java_com_example_gstreamer_GStreamerBridge_nativeStartPipeline(JNIEnv *env, jobj
         }
     }
 
+    /* Check if pipeline contains an appsrc named 'mysource' */
+    GstElement *found_src = gst_bin_get_by_name(GST_BIN(current_pipeline), "mysource");
+    if (found_src != NULL) {
+        active_app_src = found_src;
+        LOGI("Found appsrc element named 'mysource'");
+    } else {
+        active_app_src = NULL;
+    }
+
     /* Set pipeline directly to PLAYING state (matches official GStreamer Tutorial 3) */
     GstStateChangeReturn play_ret = gst_element_set_state(current_pipeline, GST_STATE_PLAYING);
     LOGI("gst_element_set_state PLAYING returned: %d", play_ret);
 
     if (play_ret == GST_STATE_CHANGE_FAILURE) {
         LOGE("Failed to transition pipeline to PLAYING state");
+        active_app_src = NULL;
         gst_element_set_state(current_pipeline, GST_STATE_NULL);
         if (current_bus != NULL) {
             gst_bus_set_sync_handler(current_bus, NULL, NULL, NULL);
@@ -450,6 +464,24 @@ Java_com_example_gstreamer_GStreamerBridge_nativeStartPipeline(JNIEnv *env, jobj
 
     pthread_mutex_unlock(&pipeline_mutex);
     return NULL; /* Success */
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_gstreamer_GStreamerBridge_nativePushAppSrcBuffer(JNIEnv *env, jobject thiz, jbyteArray jdata) {
+    if (active_app_src == NULL) return;
+    jsize size = (*env)->GetArrayLength(env, jdata);
+    jbyte *data = (*env)->GetByteArrayElements(env, jdata, NULL);
+    if (data == NULL) return;
+
+    GstBuffer *buffer = gst_buffer_new_allocate(NULL, size, NULL);
+    gst_buffer_fill(buffer, 0, data, size);
+
+    GstFlowReturn ret = gst_app_src_push_buffer(GST_APP_SRC(active_app_src), buffer);
+    if (ret != GST_FLOW_OK) {
+        // push failed or flushing
+    }
+
+    (*env)->ReleaseByteArrayElements(env, jdata, data, JNI_ABORT);
 }
 
 /*

@@ -58,9 +58,10 @@ GSTREAMER_PLUGINS := \
     videofilter \
     x264 \
     openh264 \
-    libav
+    libav \
+    app
 
-GSTREAMER_EXTRA_DEPS := gstreamer-video-1.0 gstreamer-rtsp-server-1.0
+GSTREAMER_EXTRA_DEPS := gstreamer-video-1.0 gstreamer-rtsp-server-1.0 gstreamer-app-1.0
 GSTREAMER_COPY_CACERTIFICATES := no
 GSTREAMER_COPY_FONTS := no
 

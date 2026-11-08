@@ -61,6 +61,17 @@ object GStreamerBridge {
     private external fun nativeStopRtspServer()
     private external fun nativeIsRtspServerRunning(): Boolean
     private external fun nativeGetAvailableH264Encoders(): String
+    private external fun nativePushAppSrcBuffer(data: ByteArray)
+
+    fun pushAppSrcBuffer(data: ByteArray) {
+        if (nativeLibrariesLoaded) {
+            try {
+                nativePushAppSrcBuffer(data)
+            } catch (t: Throwable) {
+                // ignore drop errors
+            }
+        }
+    }
 
     private var nativeLibrariesLoaded = false
     private var nativeLoadError: String? = null
