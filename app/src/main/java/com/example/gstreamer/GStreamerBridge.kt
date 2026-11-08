@@ -50,9 +50,17 @@ object GStreamerBridge {
     private external fun nativeStopPipeline()
     private external fun nativeGetPipelineState(): Int
     private external fun nativeSetDebugLevel(level: Int)
-    private external fun nativeStartRtspServer(port: String, path: String, deviceIndex: Int, rotationMethod: String): String?
+    private external fun nativeStartRtspServer(
+        port: String,
+        path: String,
+        deviceIndex: Int,
+        rotationMethod: String,
+        encoderPref: String,
+        resolution: String
+    ): String?
     private external fun nativeStopRtspServer()
     private external fun nativeIsRtspServerRunning(): Boolean
+    private external fun nativeGetAvailableH264Encoders(): String
 
     private var nativeLibrariesLoaded = false
     private var nativeLoadError: String? = null
@@ -72,6 +80,9 @@ object GStreamerBridge {
 
     private val _rtspServerUrl = MutableStateFlow("")
     val rtspServerUrl: StateFlow<String> = _rtspServerUrl.asStateFlow()
+
+    private val _availableEncoders = MutableStateFlow("")
+    val availableEncoders: StateFlow<String> = _availableEncoders.asStateFlow()
 
 
     private val _activePipelineString = MutableStateFlow("videotestsrc ! videoconvert ! autovideosink")
@@ -309,9 +320,11 @@ object GStreamerBridge {
         port: String = "8554",
         path: String = "/live",
         deviceIndex: Int = 0,
-        rotationMethod: String = "clockwise"
+        rotationMethod: String = "clockwise",
+        encoderPref: String = "auto",
+        resolution: String = "720p"
     ): String? = withContext(Dispatchers.IO) {
-        appendLog(LogLevel.CMD, "RTSP", "Starting GStreamer RTSP Server on port $port, mount path $path...")
+        appendLog(LogLevel.CMD, "RTSP", "Starting RTSP Server on port $port, mount path $path (encoder=$encoderPref, res=$resolution)...")
 
         if (!nativeLibrariesLoaded) {
             val loaded = tryLoadNativeLibraries()
@@ -331,7 +344,7 @@ object GStreamerBridge {
 
         try {
             val cleanPath = if (path.startsWith("/")) path else "/$path"
-            val errorMsg = nativeStartRtspServer(port, cleanPath, deviceIndex, rotationMethod)
+            val errorMsg = nativeStartRtspServer(port, cleanPath, deviceIndex, rotationMethod, encoderPref, resolution)
             if (errorMsg == null) {
                 _isRtspServerRunning.value = true
                 val ip = getWifiIpAddress()
@@ -349,6 +362,17 @@ object GStreamerBridge {
             _rtspServerUrl.value = ""
             appendLog(LogLevel.ERROR, "RTSP", "Exception starting RTSP Server: ${t.message}")
             return@withContext t.message ?: "RTSP Start Exception"
+        }
+    }
+
+    fun queryAvailableEncoders(): String {
+        if (!nativeLibrariesLoaded) return "Native libraries not loaded"
+        return try {
+            val encs = nativeGetAvailableH264Encoders()
+            _availableEncoders.value = encs
+            encs
+        } catch (t: Throwable) {
+            "Error querying encoders: ${t.message}"
         }
     }
 
@@ -454,6 +478,15 @@ object GStreamerBridge {
                 appendLog(LogLevel.SUCCESS, "STATUS", "GStreamer 1.28 linking and execution verified in ${(SystemClock.elapsedRealtime() - startTime)}ms")
 
                 _engineState.value = GstEngineState.Ready(version = versionInfo, abi = primaryAbi)
+
+                // Query and log available H.264 video encoders
+                try {
+                    val encoders = nativeGetAvailableH264Encoders()
+                    _availableEncoders.value = encoders
+                    appendLog(LogLevel.INFO, "ENCODER", "Detected H.264 Encoders: $encoders")
+                } catch (t: Throwable) {
+                    appendLog(LogLevel.WARN, "ENCODER", "Could not query encoders: ${t.message}")
+                }
 
                 // If surface was already bound before init, attach it now
                 cachedSurface?.let {

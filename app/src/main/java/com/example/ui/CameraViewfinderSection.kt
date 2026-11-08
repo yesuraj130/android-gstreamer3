@@ -131,8 +131,15 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
     // RTSP Server Configuration states
     var rtspPort by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("8554") }
     var rtspPath by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("/live") }
+    var rtspEncoderPref by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("auto") } // "auto", "hardware", "software"
+    var rtspResolution by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("720p") } // "720p", "1080p", "480p", "native"
     val isRtspRunning by GStreamerBridge.isRtspServerRunning.collectAsState()
     val rtspUrl by GStreamerBridge.rtspServerUrl.collectAsState()
+    val availableEncoders by GStreamerBridge.availableEncoders.collectAsState()
+
+    LaunchedEffect(Unit) {
+        GStreamerBridge.queryAvailableEncoders()
+    }
 
     // Unbind CameraX whenever switching to GStreamer ahcsrc mode to release camera hardware lock
     LaunchedEffect(cameraMode) {
@@ -726,11 +733,147 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
                         }
 
                         Text(
-                            text = "Streams live ahcsrc camera feed with hardware H.264 encoding (amcvideoenc_h264) directly to OBS Studio or VLC Media Player over Wi-Fi.",
+                            text = "Ultra-low-latency RTSP streaming with zero-latency leaky queue, MTU 1400, and dynamic H.264 encoding.",
                             color = ColorText,
                             fontFamily = FontFamily.Monospace,
                             fontSize = 11.sp
                         )
+
+                        // Stream Resolution Selector (720p low-latency default)
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                text = "Stream Resolution (720p recommended for lowest latency):",
+                                color = ColorCmd,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                FilterChip(
+                                    selected = rtspResolution == "720p",
+                                    onClick = { rtspResolution = "720p" },
+                                    enabled = !isRtspRunning,
+                                    label = { Text("⚡ 720p (Low Latency)", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        containerColor = ConsoleSurface,
+                                        labelColor = ColorText,
+                                        selectedContainerColor = Color(0xFF1F6FEB),
+                                        selectedLabelColor = Color.White
+                                    )
+                                )
+                                FilterChip(
+                                    selected = rtspResolution == "480p",
+                                    onClick = { rtspResolution = "480p" },
+                                    enabled = !isRtspRunning,
+                                    label = { Text("480p (Fastest)", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        containerColor = ConsoleSurface,
+                                        labelColor = ColorText,
+                                        selectedContainerColor = Color(0xFF1F6FEB),
+                                        selectedLabelColor = Color.White
+                                    )
+                                )
+                                FilterChip(
+                                    selected = rtspResolution == "1080p",
+                                    onClick = { rtspResolution = "1080p" },
+                                    enabled = !isRtspRunning,
+                                    label = { Text("1080p (FHD)", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        containerColor = ConsoleSurface,
+                                        labelColor = ColorText,
+                                        selectedContainerColor = Color(0xFF1F6FEB),
+                                        selectedLabelColor = Color.White
+                                    )
+                                )
+                                FilterChip(
+                                    selected = rtspResolution == "native",
+                                    onClick = { rtspResolution = "native" },
+                                    enabled = !isRtspRunning,
+                                    label = { Text("Native Sensor", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        containerColor = ConsoleSurface,
+                                        labelColor = ColorText,
+                                        selectedContainerColor = Color(0xFF1F6FEB),
+                                        selectedLabelColor = Color.White
+                                    )
+                                )
+                            }
+                        }
+
+                        // Encoder Preference Selector
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                text = "H.264 Encoder Preference:",
+                                color = ColorCmd,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                FilterChip(
+                                    selected = rtspEncoderPref == "auto",
+                                    onClick = { rtspEncoderPref = "auto" },
+                                    enabled = !isRtspRunning,
+                                    label = { Text("⚡ Auto (Hardware first)", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        containerColor = ConsoleSurface,
+                                        labelColor = ColorText,
+                                        selectedContainerColor = Color(0xFF1F6FEB),
+                                        selectedLabelColor = Color.White
+                                    )
+                                )
+                                FilterChip(
+                                    selected = rtspEncoderPref == "hardware",
+                                    onClick = { rtspEncoderPref = "hardware" },
+                                    enabled = !isRtspRunning,
+                                    label = { Text("Hardware (MediaCodec)", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        containerColor = ConsoleSurface,
+                                        labelColor = ColorText,
+                                        selectedContainerColor = Color(0xFF1F6FEB),
+                                        selectedLabelColor = Color.White
+                                    )
+                                )
+                                FilterChip(
+                                    selected = rtspEncoderPref == "software",
+                                    onClick = { rtspEncoderPref = "software" },
+                                    enabled = !isRtspRunning,
+                                    label = { Text("Software (x264 Ultrafast)", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        containerColor = ConsoleSurface,
+                                        labelColor = ColorText,
+                                        selectedContainerColor = Color(0xFF1F6FEB),
+                                        selectedLabelColor = Color.White
+                                    )
+                                )
+                            }
+                        }
+
+                        // Detected System Encoders Info
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            color = Color.Black.copy(alpha = 0.5f),
+                            shape = RoundedCornerShape(4.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, ConsoleBorder)
+                        ) {
+                            Text(
+                                text = if (availableEncoders.isNotBlank()) "Available H.264 Encoders: $availableEncoders" else "Encoders: amcvidenc (MediaCodec) & x264enc (libgstx264)",
+                                color = Color(0xFF8B949E),
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+                            )
+                        }
 
                         // Port & Path input fields
                         Row(
@@ -805,7 +948,9 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
                                             port = rtspPort.ifBlank { "8554" },
                                             path = rtspPath.ifBlank { "/live" },
                                             deviceIndex = gstAhcDevice,
-                                            rotationMethod = gstRotationMethod
+                                            rotationMethod = gstRotationMethod,
+                                            encoderPref = rtspEncoderPref,
+                                            resolution = rtspResolution
                                         )
 
                                         if (err != null) {

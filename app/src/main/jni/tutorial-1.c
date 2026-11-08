@@ -475,52 +475,68 @@ Java_com_example_gstreamer_GStreamerBridge_nativeGetPipelineState(JNIEnv *env, j
     }
 }
 
-static char *get_h264_encoder_pipeline_fragment(void) {
-    /* 1. Check if any hardware amcvidenc exists in the GStreamer registry */
-    GList *list = gst_element_factory_list_get_elements(
-        GST_ELEMENT_FACTORY_TYPE_ENCODER | GST_ELEMENT_FACTORY_TYPE_MEDIA_VIDEO,
-        GST_RANK_MARGINAL);
-    GstCaps *h264_caps = gst_caps_from_string("video/x-h264");
+static char current_active_encoder_name[128] = "Auto";
+
+static char *get_h264_encoder_pipeline_fragment(const char *pref, char **out_name, gboolean *out_is_hw) {
+    gboolean prefer_sw = (pref != NULL && strcmp(pref, "software") == 0);
+    gboolean prefer_hw = (pref != NULL && strcmp(pref, "hardware") == 0);
+
     char *hw_encoder = NULL;
 
-    for (GList *l = list; l != NULL; l = l->next) {
-        GstElementFactory *factory = GST_ELEMENT_FACTORY(l->data);
-        const gchar *name = gst_plugin_feature_get_name(GST_PLUGIN_FEATURE(factory));
-        LOGI("Video encoder in registry: %s", name);
-        if (h264_caps != NULL && gst_element_factory_can_src_any_caps(factory, h264_caps)) {
-            LOGI("Found H264 encoder: %s", name);
-            if (g_str_has_prefix(name, "amcvidenc") || g_str_has_prefix(name, "amcvideoenc")) {
-                if (hw_encoder == NULL) {
-                    hw_encoder = g_strdup(name);
+    if (!prefer_sw) {
+        GList *list = gst_element_factory_list_get_elements(
+            GST_ELEMENT_FACTORY_TYPE_ENCODER | GST_ELEMENT_FACTORY_TYPE_MEDIA_VIDEO,
+            GST_RANK_MARGINAL);
+        GstCaps *h264_caps = gst_caps_from_string("video/x-h264");
+
+        for (GList *l = list; l != NULL; l = l->next) {
+            GstElementFactory *factory = GST_ELEMENT_FACTORY(l->data);
+            const gchar *name = gst_plugin_feature_get_name(GST_PLUGIN_FEATURE(factory));
+            if (h264_caps != NULL && gst_element_factory_can_src_any_caps(factory, h264_caps)) {
+                if (g_str_has_prefix(name, "amcvidenc") || g_str_has_prefix(name, "amcvideoenc")) {
+                    if (hw_encoder == NULL) {
+                        hw_encoder = g_strdup(name);
+                    }
                 }
             }
         }
+        if (h264_caps) gst_caps_unref(h264_caps);
+        gst_plugin_feature_list_free(list);
     }
-    if (h264_caps) gst_caps_unref(h264_caps);
-    gst_plugin_feature_list_free(list);
 
     if (hw_encoder != NULL) {
-        LOGI("Using Hardware MediaCodec H264 Encoder: %s", hw_encoder);
-        char *fragment = g_strdup_printf("videoconvert ! video/x-raw,format=NV12 ! %s", hw_encoder);
+        LOGI("Selected Hardware MediaCodec H264 Encoder: %s", hw_encoder);
+        if (out_name) *out_name = g_strdup(hw_encoder);
+        if (out_is_hw) *out_is_hw = TRUE;
+        /* Hardware low-latency encoder pipeline fragment */
+        char *fragment = g_strdup_printf("videoconvert ! video/x-raw,format=NV12 ! %s i-frame-interval=1 bitrate=2500000", hw_encoder);
         g_free(hw_encoder);
         return fragment;
     }
 
-    /* 2. Fall back to software x264enc (ultrafast, zerolatency) */
-    if (gst_element_factory_find("x264enc") != NULL) {
-        LOGI("Using universal software x264enc (ultrafast zerolatency)");
-        return g_strdup("videoconvert ! x264enc tune=zerolatency speed-preset=ultrafast bitrate=2000 key-int-max=30");
+    if (prefer_hw) {
+        LOGW("Hardware encoder requested but not found in GStreamer registry, falling back to x264enc");
     }
 
-    /* 3. Fall back to openh264enc */
+    /* Fall back to software x264enc (ultrafast, zerolatency, intra-refresh) */
+    if (gst_element_factory_find("x264enc") != NULL) {
+        LOGI("Selected Software x264enc (ultrafast zerolatency intra-refresh)");
+        if (out_name) *out_name = g_strdup("x264enc");
+        if (out_is_hw) *out_is_hw = FALSE;
+        return g_strdup("videoconvert ! video/x-raw,format=I420 ! x264enc tune=zerolatency speed-preset=ultrafast bitrate=2048 key-int-max=15 bframes=0 rc-lookahead=0 sliced-threads=true");
+    }
+
+    /* Fall back to openh264enc */
     if (gst_element_factory_find("openh264enc") != NULL) {
-        LOGI("Using openh264enc");
+        LOGI("Selected openh264enc");
+        if (out_name) *out_name = g_strdup("openh264enc");
+        if (out_is_hw) *out_is_hw = FALSE;
         return g_strdup("videoconvert ! openh264enc");
     }
 
-    /* 4. Default fallback */
-    LOGW("Defaulting to x264enc");
-    return g_strdup("videoconvert ! x264enc tune=zerolatency speed-preset=ultrafast bitrate=2000 key-int-max=30");
+    if (out_name) *out_name = g_strdup("x264enc");
+    if (out_is_hw) *out_is_hw = FALSE;
+    return g_strdup("videoconvert ! x264enc tune=zerolatency speed-preset=ultrafast bitrate=2048 key-int-max=15");
 }
 
 static void media_configure_cb(GstRTSPMediaFactory *factory, GstRTSPMedia *media, gpointer user_data) {
@@ -542,15 +558,45 @@ static void media_configure_cb(GstRTSPMediaFactory *factory, GstRTSPMedia *media
 }
 
 /*
- * Native RTSP Server implementation using GstRTSPServer
+ * Query available H.264 video encoders
+ */
+JNIEXPORT jstring JNICALL
+Java_com_example_gstreamer_GStreamerBridge_nativeGetAvailableH264Encoders(JNIEnv *env, jobject thiz) {
+    GList *list = gst_element_factory_list_get_elements(
+        GST_ELEMENT_FACTORY_TYPE_ENCODER | GST_ELEMENT_FACTORY_TYPE_MEDIA_VIDEO,
+        GST_RANK_MARGINAL);
+    GstCaps *h264_caps = gst_caps_from_string("video/x-h264");
+    GString *str = g_string_new("");
+
+    for (GList *l = list; l != NULL; l = l->next) {
+        GstElementFactory *factory = GST_ELEMENT_FACTORY(l->data);
+        const gchar *name = gst_plugin_feature_get_name(GST_PLUGIN_FEATURE(factory));
+        if (h264_caps != NULL && gst_element_factory_can_src_any_caps(factory, h264_caps)) {
+            if (str->len > 0) g_string_append(str, ", ");
+            g_string_append(str, name);
+        }
+    }
+    if (h264_caps) gst_caps_unref(h264_caps);
+    gst_plugin_feature_list_free(list);
+
+    jstring res = (*env)->NewStringUTF(env, str->str);
+    g_string_free(str, TRUE);
+    return res;
+}
+
+/*
+ * Native RTSP Server implementation with latency, resolution, and encoder controls
  */
 JNIEXPORT jstring JNICALL
 Java_com_example_gstreamer_GStreamerBridge_nativeStartRtspServer(JNIEnv *env, jobject thiz,
-    jstring jport, jstring jpath, jint device_index, jstring jrotation) {
+    jstring jport, jstring jpath, jint device_index, jstring jrotation,
+    jstring jencoder_pref, jstring jresolution) {
 
     const char *port = (*env)->GetStringUTFChars(env, jport, NULL);
     const char *path = (*env)->GetStringUTFChars(env, jpath, NULL);
     const char *rotation = (*env)->GetStringUTFChars(env, jrotation, NULL);
+    const char *encoder_pref = jencoder_pref ? (*env)->GetStringUTFChars(env, jencoder_pref, NULL) : NULL;
+    const char *resolution = jresolution ? (*env)->GetStringUTFChars(env, jresolution, NULL) : NULL;
 
     ensure_worker_thread();
 
@@ -580,15 +626,37 @@ Java_com_example_gstreamer_GStreamerBridge_nativeStartRtspServer(JNIEnv *env, jo
         snprintf(rotation_str, sizeof(rotation_str), "! videoflip method=%s ", rotation);
     }
 
-    char *enc_fragment = get_h264_encoder_pipeline_fragment();
+    /* Resolution caps filter for low-latency bandwidth reduction */
+    char res_caps[128] = "";
+    if (resolution != NULL) {
+        if (strcmp(resolution, "720p") == 0) {
+            snprintf(res_caps, sizeof(res_caps), "! video/x-raw,width=1280,height=720,framerate=30/1 ");
+        } else if (strcmp(resolution, "1080p") == 0) {
+            snprintf(res_caps, sizeof(res_caps), "! video/x-raw,width=1920,height=1080,framerate=30/1 ");
+        } else if (strcmp(resolution, "480p") == 0) {
+            snprintf(res_caps, sizeof(res_caps), "! video/x-raw,width=854,height=480,framerate=30/1 ");
+        }
+    }
 
-    /* Build factory pipeline string:
-     * ( ahcsrc device=0 ! queue max-size-buffers=1 leaky=downstream ! videoflip method=clockwise ! <enc_fragment> ! h264parse ! rtph264pay name=pay0 pt=96 config-interval=1 )
+    char *chosen_name = NULL;
+    gboolean is_hw = FALSE;
+    char *enc_fragment = get_h264_encoder_pipeline_fragment(encoder_pref, &chosen_name, &is_hw);
+
+    if (chosen_name != NULL) {
+        snprintf(current_active_encoder_name, sizeof(current_active_encoder_name), "%s (%s)",
+            chosen_name, is_hw ? "Hardware MediaCodec" : "Software x264");
+    } else {
+        snprintf(current_active_encoder_name, sizeof(current_active_encoder_name), "x264enc (Software)");
+    }
+
+    /* Build factory pipeline string with 0-latency leaky queue & MTU 1400:
+     * ( ahcsrc device=0 ! queue max-size-buffers=1 max-size-time=0 max-size-bytes=0 leaky=downstream <res_caps> <rotation_str> ! <enc_fragment> ! h264parse ! rtph264pay name=pay0 pt=96 config-interval=1 mtu=1400 )
      */
     char launch_str[1024];
     snprintf(launch_str, sizeof(launch_str),
-        "( ahcsrc %s ! queue max-size-buffers=1 leaky=downstream %s! %s ! h264parse ! rtph264pay name=pay0 pt=96 config-interval=1 )",
-        device_str, rotation_str, enc_fragment ? enc_fragment : "videoconvert ! x264enc tune=zerolatency speed-preset=ultrafast");
+        "( ahcsrc %s ! queue max-size-buffers=1 max-size-time=0 max-size-bytes=0 leaky=downstream %s%s! %s ! h264parse ! rtph264pay name=pay0 pt=96 config-interval=1 mtu=1400 )",
+        device_str, res_caps, rotation_str,
+        enc_fragment ? enc_fragment : "videoconvert ! x264enc tune=zerolatency speed-preset=ultrafast");
 
     if (enc_fragment) g_free(enc_fragment);
 
@@ -600,6 +668,9 @@ Java_com_example_gstreamer_GStreamerBridge_nativeStartRtspServer(JNIEnv *env, jo
         if (port) (*env)->ReleaseStringUTFChars(env, jport, port);
         if (path) (*env)->ReleaseStringUTFChars(env, jpath, path);
         if (rotation) (*env)->ReleaseStringUTFChars(env, jrotation, rotation);
+        if (encoder_pref) (*env)->ReleaseStringUTFChars(env, jencoder_pref, encoder_pref);
+        if (resolution) (*env)->ReleaseStringUTFChars(env, jresolution, resolution);
+        if (chosen_name) g_free(chosen_name);
         return (*env)->NewStringUTF(env, "Failed to create GstRTSPServer instance");
     }
 
@@ -619,7 +690,6 @@ Java_com_example_gstreamer_GStreamerBridge_nativeStartRtspServer(JNIEnv *env, jo
 
     g_signal_connect(factory, "media-configure", G_CALLBACK(media_configure_cb), NULL);
 
-
     const char *mount_path = (path != NULL && strlen(path) > 0) ? path : "/live";
     gst_rtsp_mount_points_add_factory(mounts, mount_path, factory);
     g_object_unref(mounts);
@@ -635,20 +705,29 @@ Java_com_example_gstreamer_GStreamerBridge_nativeStartRtspServer(JNIEnv *env, jo
         if (port) (*env)->ReleaseStringUTFChars(env, jport, port);
         if (path) (*env)->ReleaseStringUTFChars(env, jpath, path);
         if (rotation) (*env)->ReleaseStringUTFChars(env, jrotation, rotation);
+        if (encoder_pref) (*env)->ReleaseStringUTFChars(env, jencoder_pref, encoder_pref);
+        if (resolution) (*env)->ReleaseStringUTFChars(env, jresolution, resolution);
+        if (chosen_name) g_free(chosen_name);
         return (*env)->NewStringUTF(env, "Failed to attach GstRTSPServer to socket port");
     }
 
     rtsp_server_running = TRUE;
     pthread_mutex_unlock(&rtsp_mutex);
 
-    LOGI("GstRTSPServer attached successfully on port %s mount %s", port ? port : "8554", mount_path);
-    gchar *log_msg = g_strdup_printf("RTSP Server listening on port %s (mount point %s)", port ? port : "8554", mount_path);
+    LOGI("GstRTSPServer attached successfully on port %s mount %s, active encoder: %s",
+        port ? port : "8554", mount_path, current_active_encoder_name);
+
+    gchar *log_msg = g_strdup_printf("RTSP Server online on port %s%s | Encoder: %s | Res: %s",
+        port ? port : "8554", mount_path, current_active_encoder_name, resolution ? resolution : "Native");
     notify_java_message(log_msg, FALSE);
     g_free(log_msg);
 
     if (port) (*env)->ReleaseStringUTFChars(env, jport, port);
     if (path) (*env)->ReleaseStringUTFChars(env, jpath, path);
     if (rotation) (*env)->ReleaseStringUTFChars(env, jrotation, rotation);
+    if (encoder_pref) (*env)->ReleaseStringUTFChars(env, jencoder_pref, encoder_pref);
+    if (resolution) (*env)->ReleaseStringUTFChars(env, jresolution, resolution);
+    if (chosen_name) g_free(chosen_name);
 
     return NULL; /* Success */
 }
