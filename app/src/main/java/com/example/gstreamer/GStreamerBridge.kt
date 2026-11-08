@@ -70,12 +70,60 @@ object GStreamerBridge {
     private val _debugLevel = MutableStateFlow(5) // Default: 5 (DEBUG)
     val debugLevel: StateFlow<Int> = _debugLevel.asStateFlow()
 
+    private val _userBookmarks = MutableStateFlow<List<Pair<String, String>>>(emptyList())
+    val userBookmarks: StateFlow<List<Pair<String, String>>> = _userBookmarks.asStateFlow()
+
     private var cachedSurface: Surface? = null
 
     private val timeFormatter = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
 
     fun initContext(context: Context) {
         appContext = context.applicationContext
+        loadSavedBookmarks()
+    }
+
+    private fun loadSavedBookmarks() {
+        val ctx = appContext ?: return
+        try {
+            val prefs = ctx.getSharedPreferences("gst_bookmarks", Context.MODE_PRIVATE)
+            val allEntries = prefs.all
+            val list = mutableListOf<Pair<String, String>>()
+            for ((key, value) in allEntries) {
+                if (value is String) {
+                    list.add(key to value)
+                }
+            }
+            _userBookmarks.value = list
+        } catch (e: Exception) {
+            Log.e(TAG, "Error loading bookmarks", e)
+        }
+    }
+
+    fun saveBookmark(title: String, pipeline: String) {
+        val ctx = appContext ?: return
+        val cleanTitle = title.trim()
+        val cleanPipeline = pipeline.trim()
+        if (cleanTitle.isEmpty() || cleanPipeline.isEmpty()) return
+        try {
+            val prefs = ctx.getSharedPreferences("gst_bookmarks", Context.MODE_PRIVATE)
+            prefs.edit().putString(cleanTitle, cleanPipeline).apply()
+            loadSavedBookmarks()
+            appendLog(LogLevel.SUCCESS, "BOOKMARK", "Saved pipeline bookmark: '$cleanTitle'")
+        } catch (e: Exception) {
+            appendLog(LogLevel.ERROR, "BOOKMARK", "Failed to save bookmark: ${e.message}")
+        }
+    }
+
+    fun deleteBookmark(title: String) {
+        val ctx = appContext ?: return
+        try {
+            val prefs = ctx.getSharedPreferences("gst_bookmarks", Context.MODE_PRIVATE)
+            prefs.edit().remove(title).apply()
+            loadSavedBookmarks()
+            appendLog(LogLevel.INFO, "BOOKMARK", "Deleted pipeline bookmark: '$title'")
+        } catch (e: Exception) {
+            appendLog(LogLevel.ERROR, "BOOKMARK", "Failed to delete bookmark: ${e.message}")
+        }
     }
 
     fun setDebugLevel(level: Int) {
