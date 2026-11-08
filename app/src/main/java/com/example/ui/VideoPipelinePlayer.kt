@@ -72,9 +72,9 @@ data class PipelinePreset(
 val DEFAULT_PRESETS = listOf(
     PipelinePreset("Color Bars", "videotestsrc ! videoconvert ! autovideosink"),
     PipelinePreset("Bouncing Ball", "videotestsrc pattern=ball ! videoconvert ! autovideosink"),
-    PipelinePreset("HTTP MP4 Video", "playbin uri=http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"),
-    PipelinePreset("RTSP TCP Stream", "rtspsrc location=rtsp://wowzaec2demo.streamlock.net/vod/mp4:BigBuckBunny_115k.mov protocols=tcp latency=100 ! rtph264depay ! h264parse ! decodebin ! videoconvert ! autovideosink"),
-    PipelinePreset("RTSP (playbin)", "playbin uri=rtsp://wowzaec2demo.streamlock.net/vod/mp4:BigBuckBunny_115k.mov"),
+    PipelinePreset("HTTP Sintel Video", "souphttpsrc location=https://gstreamer.freedesktop.org/data/media/sintel_trailer-480p.webm user-agent=\"Mozilla/5.0\" ssl-strict=false ! matroskademux ! decodebin ! videoconvert ! autovideosink"),
+    PipelinePreset("RTSP TCP Stream", "rtspsrc location=rtsp://rtspstream.com/pattern protocols=tcp latency=100 user-agent=\"GStreamer\" ! rtph264depay ! h264parse ! decodebin ! videoconvert ! autovideosink"),
+    PipelinePreset("RTSP (playbin)", "playbin uri=rtsp://rtspstream.com/pattern"),
     PipelinePreset("Snow Noise", "videotestsrc pattern=snow ! videoconvert ! autovideosink")
 )
 
