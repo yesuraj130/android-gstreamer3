@@ -82,9 +82,11 @@ fun TerminalLogViewer(modifier: Modifier = Modifier) {
 
     var autoScroll by remember { mutableStateOf(true) }
 
-    // Run diagnostics automatically on start
+    // Run diagnostics automatically ONCE on initial launch if engineState is Idle
     LaunchedEffect(Unit) {
-        GStreamerBridge.runDiagnostics(context)
+        if (GStreamerBridge.engineState.value == GstEngineState.Idle) {
+            GStreamerBridge.runDiagnostics(context, clearLogs = false)
+        }
     }
 
     // Auto scroll to bottom when new logs arrive

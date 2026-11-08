@@ -34,6 +34,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+
 private val ConsoleBackground = Color(0xFF0D1117)
 private val ConsoleSurface = Color(0xFF161B22)
 private val ConsoleBorder = Color(0xFF30363D)
@@ -43,6 +45,7 @@ private val ColorText = Color(0xFFC9D1D9)
 @Composable
 fun MainScreen(modifier: Modifier = Modifier) {
     var selectedTabIndex by remember { mutableIntStateOf(0) }
+    val saveableStateHolder = rememberSaveableStateHolder()
 
     Column(
         modifier = modifier
@@ -167,16 +170,18 @@ fun MainScreen(modifier: Modifier = Modifier) {
             )
         }
 
-        // Active Tab Screen Content
+        // Active Tab Screen Content with state preservation
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .weight(1f)
         ) {
-            when (selectedTabIndex) {
-                0 -> VideoPipelineSection()
-                1 -> CameraViewfinderSection()
-                2 -> TerminalLogViewer()
+            saveableStateHolder.SaveableStateProvider(key = selectedTabIndex) {
+                when (selectedTabIndex) {
+                    0 -> VideoPipelineSection()
+                    1 -> CameraViewfinderSection()
+                    2 -> TerminalLogViewer()
+                }
             }
         }
     }

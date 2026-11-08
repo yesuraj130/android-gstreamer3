@@ -387,10 +387,12 @@ object GStreamerBridge {
         }
     }
 
-    suspend fun runDiagnostics(context: Context) = withContext(Dispatchers.IO) {
+    suspend fun runDiagnostics(context: Context, clearLogs: Boolean = false) = withContext(Dispatchers.IO) {
         initContext(context)
         _engineState.value = GstEngineState.Inspecting
-        _logs.value = emptyList()
+        if (clearLogs) {
+            _logs.value = emptyList()
+        }
 
         val startTime = SystemClock.elapsedRealtime()
 

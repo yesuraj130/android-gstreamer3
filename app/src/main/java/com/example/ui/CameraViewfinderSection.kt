@@ -122,15 +122,15 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
         hasMicPermission = permissions[Manifest.permission.RECORD_AUDIO] == true
     }
 
-    var cameraMode by remember { mutableStateOf(CameraEngineMode.CAMERAX_VIEWFINDER) }
-    var lensFacing by remember { mutableStateOf(CameraSelector.LENS_FACING_BACK) }
-    var isGstCameraActive by remember { mutableStateOf(false) }
-    var gstAhcDevice by remember { mutableStateOf(0) } // 0 = Back, 1 = Front, -1 = Auto
-    var gstRotationMethod by remember { mutableStateOf("clockwise") } // "clockwise" = 90° CW (default for portrait)
+    var cameraMode by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(CameraEngineMode.CAMERAX_VIEWFINDER) }
+    var lensFacing by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(CameraSelector.LENS_FACING_BACK) }
+    var isGstCameraActive by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    var gstAhcDevice by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(0) } // 0 = Back, 1 = Front, -1 = Auto
+    var gstRotationMethod by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("clockwise") } // "clockwise" = 90° CW (default for portrait)
 
     // RTSP Server Configuration states
-    var rtspPort by remember { mutableStateOf("8554") }
-    var rtspPath by remember { mutableStateOf("/live") }
+    var rtspPort by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("8554") }
+    var rtspPath by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("/live") }
     val isRtspRunning by GStreamerBridge.isRtspServerRunning.collectAsState()
     val rtspUrl by GStreamerBridge.rtspServerUrl.collectAsState()
 

@@ -533,6 +533,9 @@ Java_com_example_gstreamer_GStreamerBridge_nativeStartRtspServer(JNIEnv *env, jo
         return (*env)->NewStringUTF(env, "Failed to create GstRTSPServer instance");
     }
 
+    /* Bind explicitly to IPv4 wildcard 0.0.0.0 */
+    gst_rtsp_server_set_address(rtsp_server, "0.0.0.0");
+
     if (port != NULL && strlen(port) > 0) {
         gst_rtsp_server_set_service(rtsp_server, port);
     }
@@ -542,6 +545,7 @@ Java_com_example_gstreamer_GStreamerBridge_nativeStartRtspServer(JNIEnv *env, jo
 
     gst_rtsp_media_factory_set_launch(factory, launch_str);
     gst_rtsp_media_factory_set_shared(factory, TRUE);
+    gst_rtsp_media_factory_set_protocols(factory, GST_RTSP_LOWER_TRANS_TCP | GST_RTSP_LOWER_TRANS_UDP);
 
     const char *mount_path = (path != NULL && strlen(path) > 0) ? path : "/live";
     gst_rtsp_mount_points_add_factory(mounts, mount_path, factory);
