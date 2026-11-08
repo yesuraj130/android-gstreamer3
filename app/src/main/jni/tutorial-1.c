@@ -89,7 +89,7 @@ static void gst_native_log_handler(GstDebugCategory *category, GstDebugLevel lev
         const gchar *cat_name = category ? gst_debug_category_get_name(category) : "gst";
         const gchar *msg_text = message ? gst_debug_message_get(message) : NULL;
         if (msg_text != NULL && strlen(msg_text) > 0) {
-            /* Filter out noisy GLib context spam if any */
+            /* Filter out noisy GLib context spam */
             if (strstr(msg_text, "g_main_context") != NULL || strstr(msg_text, "g_source") != NULL) {
                 return;
             }
@@ -113,7 +113,6 @@ static GstBusSyncReply bus_sync_handler(GstBus *bus, GstMessage *msg, gpointer u
         if (current_native_window != NULL) {
             LOGI("bus_sync_handler: binding ANativeWindow %p to overlay sink", current_native_window);
             gst_video_overlay_set_window_handle(overlay, (guintptr)current_native_window);
-            gst_video_overlay_expose(overlay);
         } else {
             LOGW("bus_sync_handler: prepare-window-handle received but native_window is NULL");
         }
@@ -368,23 +367,7 @@ Java_com_example_gstreamer_GStreamerBridge_nativeStartPipeline(JNIEnv *env, jobj
         }
     }
 
-    /* Transition pipeline to READY to instantiate elements */
-    GstStateChangeReturn ready_ret = gst_element_set_state(current_pipeline, GST_STATE_READY);
-    LOGI("gst_element_set_state READY returned: %d", ready_ret);
-
-    /* Eagerly set window handle if window is active */
-    pthread_mutex_lock(&window_mutex);
-    if (current_native_window != NULL) {
-        GstElement *overlay = gst_bin_get_by_interface(GST_BIN(current_pipeline), GST_TYPE_VIDEO_OVERLAY);
-        if (overlay != NULL) {
-            LOGI("Eagerly binding window %p at READY state", current_native_window);
-            gst_video_overlay_set_window_handle(GST_VIDEO_OVERLAY(overlay), (guintptr)current_native_window);
-            gst_object_unref(overlay);
-        }
-    }
-    pthread_mutex_unlock(&window_mutex);
-
-    /* Start playback */
+    /* Set pipeline directly to PLAYING state (matches official GStreamer Tutorial 3) */
     GstStateChangeReturn play_ret = gst_element_set_state(current_pipeline, GST_STATE_PLAYING);
     LOGI("gst_element_set_state PLAYING returned: %d", play_ret);
 
