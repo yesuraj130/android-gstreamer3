@@ -75,7 +75,8 @@ val DEFAULT_PRESETS = listOf(
     PipelinePreset("RTSP (rtspsrc + TCP)", "rtspsrc location=rtsp://rtspstream.com/pattern protocols=tcp latency=100 ! rtph264depay ! h264parse ! decodebin ! videoconvert ! autovideosink"),
     PipelinePreset("RTSP (uridecodebin + TCP)", "uridecodebin uri=rtsp://rtspstream.com/pattern source::protocols=tcp ! videoconvert ! autovideosink"),
     PipelinePreset("RTSP (playbin + TCP)", "playbin uri=rtsp://rtspstream.com/pattern source::protocols=tcp"),
-    PipelinePreset("HTTP MP4", "souphttpsrc location=http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4 user-agent=\"Mozilla/5.0\" ssl-strict=false ! qtdemux ! h264parse ! decodebin ! videoconvert ! autovideosink"),
+    PipelinePreset("HTTPS MP4 (playbin)", "playbin uri=https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"),
+    PipelinePreset("HTTP/S MP4 (souphttpsrc)", "souphttpsrc location=https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4 user-agent=\"Mozilla/5.0\" ssl-strict=false ! qtdemux ! h264parse ! decodebin ! videoconvert ! autovideosink"),
     PipelinePreset("Snow Noise", "videotestsrc pattern=snow ! videoconvert ! autovideosink")
 )
 

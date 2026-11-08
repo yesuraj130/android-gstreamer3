@@ -36,12 +36,16 @@ endif
 GSTREAMER_NDK_BUILD_PATH := $(GSTREAMER_ROOT)/share/gst-android/ndk-build
 include $(GSTREAMER_NDK_BUILD_PATH)/plugins.mk
 
-# Core + Playback + System + Network + H264/H265/AAC Parsers & Decoders
+# Core + Playback + System + Network + Codecs + TLS / Net Restricted + H264/H265/AAC Parsers & Decoders
 GSTREAMER_PLUGINS := \
     $(GSTREAMER_PLUGINS_CORE) \
     $(GSTREAMER_PLUGINS_PLAYBACK) \
     $(GSTREAMER_PLUGINS_SYS) \
     $(GSTREAMER_PLUGINS_NET) \
+    $(GSTREAMER_PLUGINS_NET_RESTRICTED) \
+    $(GSTREAMER_PLUGINS_CODECS) \
+    glibnetworking \
+    openssl \
     typefindfunctions \
     videoparsersbad \
     audioparsers \
