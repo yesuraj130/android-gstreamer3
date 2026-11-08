@@ -126,8 +126,9 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
     var cameraMode by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(CameraEngineMode.CAMERAX_VIEWFINDER) }
     var lensFacing by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(CameraSelector.LENS_FACING_BACK) }
     var isGstCameraActive by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
-    var gstAhcDevice by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(0) } // 0 = Back, 1 = Front, -1 = Auto
+    var gstAhcDevice by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(0) } // 0 = Back, 1 = Front, 2 = Ultra-Wide, -1 = Auto
     var gstRotationMethod by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("clockwise") } // "clockwise" = 90° CW (default for portrait)
+    var cameraXZoomRatio by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(1.0f) }
 
     // RTSP Server Configuration states
     var rtspPort by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("8554") }
@@ -464,11 +465,16 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
 
                                     try {
                                         cameraProvider.unbindAll()
-                                        cameraProvider.bindToLifecycle(
+                                        val boundCam = cameraProvider.bindToLifecycle(
                                             lifecycleOwner,
                                             selector,
                                             preview
                                         )
+                                        try {
+                                            boundCam.cameraControl.setZoomRatio(cameraXZoomRatio)
+                                        } catch (ze: Exception) {
+                                            Log.w("CameraViewfinder", "Zoom ratio ${cameraXZoomRatio}x not applied: ${ze.message}")
+                                        }
                                     } catch (exc: Exception) {
                                         Log.e("CameraViewfinder", "Use case binding failed", exc)
                                     }
@@ -585,6 +591,43 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
                             fontFamily = FontFamily.Monospace
                         )
                     }
+                }
+            }
+
+            // CameraX Zoom Selector (0.6x Ultra-Wide, 1.0x Main, 2.0x Telephoto)
+            if (cameraMode == CameraEngineMode.CAMERAX_VIEWFINDER && lensFacing == CameraSelector.LENS_FACING_BACK) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = "CameraX Zoom:",
+                        color = ColorCmd,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    FilterChip(
+                        selected = cameraXZoomRatio == 0.6f,
+                        onClick = { cameraXZoomRatio = 0.6f },
+                        label = { Text("0.6x Ultra-Wide", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
+                        colors = FilterChipDefaults.filterChipColors(containerColor = ConsoleSurface, labelColor = ColorText, selectedContainerColor = Color(0xFF1F6FEB), selectedLabelColor = Color.White)
+                    )
+                    FilterChip(
+                        selected = cameraXZoomRatio == 1.0f,
+                        onClick = { cameraXZoomRatio = 1.0f },
+                        label = { Text("1.0x Main", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
+                        colors = FilterChipDefaults.filterChipColors(containerColor = ConsoleSurface, labelColor = ColorText, selectedContainerColor = Color(0xFF1F6FEB), selectedLabelColor = Color.White)
+                    )
+                    FilterChip(
+                        selected = cameraXZoomRatio == 2.0f,
+                        onClick = { cameraXZoomRatio = 2.0f },
+                        label = { Text("2.0x Telephoto", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
+                        colors = FilterChipDefaults.filterChipColors(containerColor = ConsoleSurface, labelColor = ColorText, selectedContainerColor = Color(0xFF1F6FEB), selectedLabelColor = Color.White)
+                    )
                 }
             }
 
