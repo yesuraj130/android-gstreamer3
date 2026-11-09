@@ -96,7 +96,8 @@ private val ColorText = Color(0xFFC9D1D9)
 
 enum class CameraEngineMode {
     CAMERAX_VIEWFINDER,
-    GSTREAMER_AHCSRC
+    GSTREAMER_AHCSRC,
+    GSTREAMER_APPSRC
 }
 
 @Composable
@@ -129,6 +130,12 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
     var gstAhcDevice by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(0) } // 0 = Back, 1 = Front, 2 = Ultra-Wide, -1 = Auto
     var gstRotationMethod by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("clockwise") } // "clockwise" = 90° CW (default for portrait)
     var cameraXZoomRatio by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(1.0f) }
+
+    // AppSrc Manager states
+    val appSrcManager = remember { Camera2AppSrcManager(context) }
+    var isAppSrcActive by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    var appSrcCameraId by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("0") }
+    var appSrcPipelineDesc by remember { mutableStateOf("") }
 
     // RTSP Server Configuration states
     var rtspPort by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("8554") }
@@ -164,14 +171,14 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
         GStreamerBridge.queryAvailableEncoders()
     }
 
-    // Unbind CameraX whenever switching to GStreamer ahcsrc mode to release camera hardware lock
+    // Unbind CameraX whenever switching to GStreamer mode to release camera hardware lock
     LaunchedEffect(cameraMode) {
-        if (cameraMode == CameraEngineMode.GSTREAMER_AHCSRC) {
+        if (cameraMode == CameraEngineMode.GSTREAMER_AHCSRC || cameraMode == CameraEngineMode.GSTREAMER_APPSRC) {
             try {
                 val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
                 val cameraProvider = cameraProviderFuture.get()
                 cameraProvider.unbindAll()
-                Log.i("CameraViewfinder", "CameraX provider unbound to grant exclusive access to GStreamer ahcsrc")
+                Log.i("CameraViewfinder", "CameraX provider unbound to grant exclusive access to GStreamer")
             } catch (e: Exception) {
                 Log.w("CameraViewfinder", "Failed to unbind CameraX provider: ${e.message}")
             }
@@ -336,6 +343,10 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
                 FilterChip(
                     selected = cameraMode == CameraEngineMode.GSTREAMER_AHCSRC,
                     onClick = {
+                        if (isAppSrcActive) {
+                            appSrcManager.stop()
+                            isAppSrcActive = false
+                        }
                         cameraMode = CameraEngineMode.GSTREAMER_AHCSRC
                     },
                     label = {
@@ -352,6 +363,35 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
                         selectedLabelColor = Color.White
                     ),
                     modifier = Modifier.testTag("gstreamer_ahcsrc_mode_chip")
+                )
+
+                FilterChip(
+                    selected = cameraMode == CameraEngineMode.GSTREAMER_APPSRC,
+                    onClick = {
+                        if (isGstCameraActive) {
+                            scope.launch { GStreamerBridge.stopPipeline() }
+                            isGstCameraActive = false
+                        }
+                        if (isAppSrcActive) {
+                            appSrcManager.stop()
+                            isAppSrcActive = false
+                        }
+                        cameraMode = CameraEngineMode.GSTREAMER_APPSRC
+                    },
+                    label = {
+                        Text(
+                            text = "GStreamer AppSrc (Multi-Cam Camera2)",
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 11.sp
+                        )
+                    },
+                    colors = FilterChipDefaults.filterChipColors(
+                        containerColor = ConsoleSurface,
+                        labelColor = ColorText,
+                        selectedContainerColor = Color(0xFF1F6FEB),
+                        selectedLabelColor = Color.White
+                    ),
+                    modifier = Modifier.testTag("gstreamer_appsrc_mode_chip")
                 )
             }
 
@@ -486,8 +526,8 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
                         )
                     }
 
-                    CameraEngineMode.GSTREAMER_AHCSRC -> {
-                        // Native SurfaceView fed by GStreamer ahcsrc pipeline
+                    CameraEngineMode.GSTREAMER_AHCSRC, CameraEngineMode.GSTREAMER_APPSRC -> {
+                        // Native SurfaceView fed by GStreamer pipeline
                         AndroidView(
                             factory = { ctx ->
                                 android.view.SurfaceView(ctx).apply {
@@ -513,7 +553,7 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
                             },
                             modifier = Modifier
                                 .fillMaxSize()
-                                .testTag("gstreamer_ahcsrc_surface")
+                                .testTag(if (cameraMode == CameraEngineMode.GSTREAMER_APPSRC) "gstreamer_appsrc_surface" else "gstreamer_ahcsrc_surface")
                         )
                     }
                 }
@@ -534,17 +574,18 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
                             modifier = Modifier
                                 .size(8.dp)
                                 .clip(CircleShape)
-                                .background(if (isRtspRunning || isGstCameraActive) ColorSuccess else ColorCmd)
+                                .background(if (isRtspRunning || isGstCameraActive || isAppSrcActive) ColorSuccess else ColorCmd)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = when {
                                 cameraMode == CameraEngineMode.CAMERAX_VIEWFINDER -> "CAMERAX: LIVE VIEWFINDER"
                                 isRtspRunning -> "RTSP SERVER: BROADCASTING LIVE"
+                                cameraMode == CameraEngineMode.GSTREAMER_APPSRC -> if (isAppSrcActive) "APPSRC: LIVE (dev=$appSrcCameraId)" else "APPSRC: IDLE"
                                 isGstCameraActive -> "GSTREAMER: AHCSRC ACTIVE"
                                 else -> "GSTREAMER: IDLE (READY)"
                             },
-                            color = if (isRtspRunning || isGstCameraActive) ColorSuccess else ColorCmd,
+                            color = if (isRtspRunning || isGstCameraActive || isAppSrcActive) ColorSuccess else ColorCmd,
                             fontSize = 11.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold
@@ -628,6 +669,366 @@ fun CameraViewfinderSection(modifier: Modifier = Modifier) {
                         label = { Text("2.0x Telephoto", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
                         colors = FilterChipDefaults.filterChipColors(containerColor = ConsoleSurface, labelColor = ColorText, selectedContainerColor = Color(0xFF1F6FEB), selectedLabelColor = Color.White)
                     )
+                }
+            }
+
+            // GStreamer AppSrc Controls Section
+            if (cameraMode == CameraEngineMode.GSTREAMER_APPSRC) {
+                // Dynamic Camera Lens Selector (dev=0, 1, 2, ...)
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = "Dynamic Cameras (Camera2 AppSrc dev=0, 1, 2...):",
+                        color = ColorCmd,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        if (availableCameras.isNotEmpty()) {
+                            for (cam in availableCameras) {
+                                FilterChip(
+                                    selected = appSrcCameraId == cam.cameraId,
+                                    onClick = { appSrcCameraId = cam.cameraId },
+                                    enabled = !isAppSrcActive,
+                                    label = { Text(cam.label, fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        containerColor = ConsoleSurface,
+                                        labelColor = ColorText,
+                                        selectedContainerColor = Color(0xFF1F6FEB),
+                                        selectedLabelColor = Color.White
+                                    )
+                                )
+                            }
+                        } else {
+                            listOf("0", "1", "2").forEach { id ->
+                                FilterChip(
+                                    selected = appSrcCameraId == id,
+                                    onClick = { appSrcCameraId = id },
+                                    enabled = !isAppSrcActive,
+                                    label = { Text("Camera dev=$id", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        containerColor = ConsoleSurface,
+                                        labelColor = ColorText,
+                                        selectedContainerColor = Color(0xFF1F6FEB),
+                                        selectedLabelColor = Color.White
+                                    )
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // AppSrc Start/Stop Control Buttons
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                try {
+                                    val cameraProvider = ProcessCameraProvider.getInstance(context).get()
+                                    cameraProvider.unbindAll()
+                                } catch (e: Exception) {}
+
+                                if (isGstCameraActive) {
+                                    GStreamerBridge.stopPipeline()
+                                    isGstCameraActive = false
+                                }
+
+                                val resParts = rtspResolution.split("x")
+                                val width = if (resParts.size == 2) resParts[0].toIntOrNull() ?: 1280 else 1280
+                                val height = if (resParts.size == 2) resParts[1].toIntOrNull() ?: 720 else 720
+
+                                GStreamerBridge.appendLog(LogLevel.CMD, "APPSRC", "Starting Camera2 appsrc for camera $appSrcCameraId at ${width}x${height} (block=false, drop on backpressure)...")
+                                appSrcManager.start(appSrcCameraId, width, height) { desc ->
+                                    appSrcPipelineDesc = desc
+                                }
+                                isAppSrcActive = true
+                            }
+                        },
+                        enabled = !isAppSrcActive,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(42.dp)
+                            .testTag("start_appsrc_camera_button"),
+                        shape = RoundedCornerShape(6.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF1F6FEB),
+                            contentColor = Color.White
+                        )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PlayArrow,
+                            contentDescription = "Start AppSrc Camera",
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "Start AppSrc Stream",
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.sp
+                        )
+                    }
+
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                appSrcManager.stop()
+                                isAppSrcActive = false
+                            }
+                        },
+                        enabled = isAppSrcActive,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(42.dp)
+                            .testTag("stop_appsrc_camera_button"),
+                        shape = RoundedCornerShape(6.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFFDA3633),
+                            contentColor = Color.White
+                        )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Stop,
+                            contentDescription = "Stop AppSrc Camera",
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "Stop AppSrc Stream",
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.sp
+                        )
+                    }
+                }
+
+                // AppSrc Pipeline Info Card
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = ConsoleSurface),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, ConsoleBorder)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = "AppSrc Architecture & Optimizations:",
+                            color = ColorCmd,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.sp
+                        )
+                        Text(
+                            text = "• Android Camera2 API -> ImageReader (YUV_420_888) -> Zero-Copy Plane Extraction -> appsrc (block=false, drop frames on backpressure).",
+                            color = ColorText,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 10.sp
+                        )
+                        Text(
+                            text = "• Encoders: Prioritizes hardware MediaCodec (amcvidenc) with fallback to ultrafast x264 software encoder.",
+                            color = ColorText,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 10.sp
+                        )
+                        if (appSrcPipelineDesc.isNotBlank()) {
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "Active Pipeline: $appSrcPipelineDesc",
+                                color = ColorSuccess,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 9.sp
+                            )
+                        }
+                    }
+                }
+            }
+
+            // GStreamer AppSrc Controls Section
+            if (cameraMode == CameraEngineMode.GSTREAMER_APPSRC) {
+                // Dynamic Camera Lens Selector (dev=0, 1, 2, ...)
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = "Dynamic Cameras (Camera2 AppSrc dev=0, 1, 2...):",
+                        color = ColorCmd,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        if (availableCameras.isNotEmpty()) {
+                            for (cam in availableCameras) {
+                                FilterChip(
+                                    selected = appSrcCameraId == cam.cameraId,
+                                    onClick = { appSrcCameraId = cam.cameraId },
+                                    enabled = !isAppSrcActive,
+                                    label = { Text(cam.label, fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        containerColor = ConsoleSurface,
+                                        labelColor = ColorText,
+                                        selectedContainerColor = Color(0xFF1F6FEB),
+                                        selectedLabelColor = Color.White
+                                    )
+                                )
+                            }
+                        } else {
+                            listOf("0", "1", "2").forEach { id ->
+                                FilterChip(
+                                    selected = appSrcCameraId == id,
+                                    onClick = { appSrcCameraId = id },
+                                    enabled = !isAppSrcActive,
+                                    label = { Text("Camera dev=$id", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        containerColor = ConsoleSurface,
+                                        labelColor = ColorText,
+                                        selectedContainerColor = Color(0xFF1F6FEB),
+                                        selectedLabelColor = Color.White
+                                    )
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // AppSrc Start/Stop Control Buttons
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                try {
+                                    val cameraProvider = ProcessCameraProvider.getInstance(context).get()
+                                    cameraProvider.unbindAll()
+                                } catch (e: Exception) {}
+
+                                if (isGstCameraActive) {
+                                    GStreamerBridge.stopPipeline()
+                                    isGstCameraActive = false
+                                }
+
+                                val resParts = rtspResolution.split("x")
+                                val width = if (resParts.size == 2) resParts[0].toIntOrNull() ?: 1280 else 1280
+                                val height = if (resParts.size == 2) resParts[1].toIntOrNull() ?: 720 else 720
+
+                                GStreamerBridge.appendLog(LogLevel.CMD, "APPSRC", "Starting Camera2 appsrc for camera $appSrcCameraId at ${width}x${height} (block=false, drop on backpressure)...")
+                                appSrcManager.start(appSrcCameraId, width, height) { desc ->
+                                    appSrcPipelineDesc = desc
+                                }
+                                isAppSrcActive = true
+                            }
+                        },
+                        enabled = !isAppSrcActive,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(42.dp)
+                            .testTag("start_appsrc_camera_button"),
+                        shape = RoundedCornerShape(6.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF1F6FEB),
+                            contentColor = Color.White
+                        )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PlayArrow,
+                            contentDescription = "Start AppSrc Camera",
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "Start AppSrc Stream",
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.sp
+                        )
+                    }
+
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                appSrcManager.stop()
+                                isAppSrcActive = false
+                            }
+                        },
+                        enabled = isAppSrcActive,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(42.dp)
+                            .testTag("stop_appsrc_camera_button"),
+                        shape = RoundedCornerShape(6.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFFDA3633),
+                            contentColor = Color.White
+                        )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Stop,
+                            contentDescription = "Stop AppSrc Camera",
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "Stop AppSrc Stream",
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.sp
+                        )
+                    }
+                }
+
+                // AppSrc Pipeline Info Card
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = ConsoleSurface),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, ConsoleBorder)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = "AppSrc Architecture & Optimizations:",
+                            color = ColorCmd,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.sp
+                        )
+                        Text(
+                            text = "• Android Camera2 API -> ImageReader (YUV_420_888) -> Zero-Copy Plane Extraction -> appsrc (block=false, drop frames on backpressure).",
+                            color = ColorText,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 10.sp
+                        )
+                        Text(
+                            text = "• Encoders: Prioritizes hardware MediaCodec (amcvidenc) with fallback to ultrafast x264 software encoder.",
+                            color = ColorText,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 10.sp
+                        )
+                        if (appSrcPipelineDesc.isNotBlank()) {
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "Active Pipeline: $appSrcPipelineDesc",
+                                color = ColorSuccess,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 9.sp
+                            )
+                        }
+                    }
                 }
             }
 
